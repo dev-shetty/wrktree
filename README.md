@@ -17,7 +17,7 @@
 ```
 
 - `●` marks the worktree of the current directory.
-- `›` marks the cursor.
+- `›` marks the cursor. When the screen opens, the cursor is on the worktree of the current directory.
 - `CHANGES` is the number of changed files. Untracked files count.
 - `↑` is the number of commits that the worktree has and the base branch does not have.
 - `↓` is the number of commits that the worktree is behind the base branch.
@@ -94,6 +94,8 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 
 The screen draws on stderr. Stdout carries only the path for a directory change.
 
+The git commands that only read run with `git --no-optional-locks`. Thus the background `git status` does not take `index.lock`, and a commit in a different terminal does not fail.
+
 ## Subcommands
 
 | Command | Action |
@@ -117,6 +119,8 @@ The screen draws on stderr. Stdout carries only the path for a directory change.
 - `--fetch` fetches the base branch first. Without it, `ls` does not use the network.
 - `--fresh` measures all disk sizes again.
 
+`wrktree switch` and `wrktree open` refuse a worktree whose folder is missing. The error is `folder is missing: use prune`.
+
 If the current directory is not in a git repository, each command prints `wrktree: not a git repository` and stops with exit code 1.
 
 ## Delete
@@ -128,6 +132,7 @@ These rules apply to `d` in the screen and to `wrktree rm`:
 - You cannot delete the main worktree.
 - You cannot delete a locked worktree. The error shows the lock reason.
 - You cannot delete a worktree whose folder is missing. Use prune for it.
+- You cannot delete a worktree that has a different worktree in its folder. `git worktree remove` deletes the inner worktree too, also when an ignore rule hides it. Delete the inner worktree first.
 - A clean worktree needs one confirmation. In the screen, press `y`. Every other key cancels.
 - A worktree with changed files needs the typed word `yes`. The prompt shows the number of changed files. Then `wrktree` runs `git worktree remove --force`.
 - A detached worktree with commits that no branch, remote ref, or tag contains also needs the typed word `yes`. The prompt shows the number of these commits.
@@ -142,17 +147,19 @@ The branch stays by default.
 
 The current worktree:
 
-- `wrktree rm` does not delete the worktree of the current directory.
-- The screen can delete it. After the delete, the shell changes to the main worktree.
+- `wrktree rm` does not delete a worktree whose folder holds the current directory. This rule also applies in a nested worktree inside that folder.
+- The screen can delete it. After the delete, the shell changes to the main worktree. If you press `ctrl+c` while the delete runs, the shell also changes to the main worktree.
 - If the `wt` function is not in use, or the repository has no main worktree, the screen refuses this delete.
 
 `wrktree rm --force` deletes without a prompt. Without a terminal and without `--force`, `wrktree rm` stops with an error on a worktree with changed files.
+
+If stdin closes or gives a read error before an answer, `wrktree rm` and `wrktree prune` print `cancelled` and stop with exit code 1. An answer that does not continue, for example `n`, stops with exit code 0.
 
 ## Prune
 
 Prune removes the git entries of worktrees whose folder is missing. These rows show `[missing]` in the table.
 
-`wrktree` runs `git worktree prune --dry-run -v` and shows the entries. After you confirm, it runs `git worktree prune`. In the screen, press `y` to prune. Every other key cancels. `wrktree prune --yes` prunes without a prompt.
+`wrktree` runs `git worktree prune --dry-run -v` and shows the entries. After you confirm, it runs `git worktree prune -v`. In the screen, press `y` to prune. Every other key cancels. `wrktree prune --yes` prunes without a prompt.
 
 ## Configuration
 
@@ -185,7 +192,9 @@ To start Claude Code in the worktree:
 open = "cd {path} && claude"
 ```
 
-If the command is not found, `wrktree` shows the command and the path of the configuration file.
+If the command is not found, `wrktree` shows the full template and the path of the configuration file.
+
+The command does not get the `WRKTREE_CD_FILE` variable. Thus a `wt` call inside the command cannot change the directory of the shell that started `wrktree`.
 
 ### base
 
@@ -197,14 +206,17 @@ To use a different base branch, set `base`:
 base = "origin/develop"
 ```
 
+The remote part of `base` is the longest name of a configured remote that `base` starts with. Thus a remote or a branch name can contain a slash. A base without a remote-tracking ref, for example the local branch `main`, is not fetched. That is not an error.
+
 ### fetch
 
-When the screen opens, `wrktree` runs `git fetch origin <base branch>` one time, in the background. All worktrees share one repository, so one fetch serves all rows.
+When the screen opens, `wrktree` runs `git fetch <remote> <branch>` for the base branch one time, in the background. All worktrees share one repository, so one fetch serves all rows.
 
 - The screen does not wait for the fetch. The distances show at once from the local copy of the remote ref. They are dim until the fetch is complete.
 - When the fetch is complete, `wrktree` calculates the distances again.
 - The fetch stops after 15 seconds. If the fetch fails, the distances stay dim and the screen shows `fetch failed: distances can be stale`.
 - `wrktree ls` does not fetch unless you add `--fetch`.
+- The fetch cannot ask for a password or a passphrase. `wrktree` sets `GIT_TERMINAL_PROMPT=0`. If you did not set `GIT_SSH_COMMAND`, it also sets `GIT_SSH_COMMAND="ssh -oBatchMode=yes"`. A fetch that needs a password fails.
 
 To stop the fetch when the screen opens, set `fetch = false`.
 
