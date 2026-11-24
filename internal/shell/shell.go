@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -14,7 +15,10 @@ import (
 // CDFileEnv names the variable that holds the file for the new directory.
 const CDFileEnv = "WRKTREE_CD_FILE"
 
-const initTemplate = `wt() {
+// initTemplate defines the function with the name of the program. In a
+// shell, a function has priority over a program, so wrktree also changes the
+// directory. `command wrktree` runs the program, not the function.
+const initTemplate = `wrktree() {
   local f; f="$(mktemp)"
   WRKTREE_CD_FILE="$f" command wrktree "$@"
   local rc=$?
@@ -26,7 +30,8 @@ const initTemplate = `wt() {
 
 var funcName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// InitScript returns the shell function text for shell, named name.
+// InitScript returns the shell function text for shell: the function
+// wrktree and a short function, named name, that calls it.
 // The name must match ^[A-Za-z_][A-Za-z0-9_]*$.
 func InitScript(shell, name string) (string, error) {
 	if !funcName.MatchString(name) {
@@ -34,7 +39,10 @@ func InitScript(shell, name string) (string, error) {
 	}
 	switch shell {
 	case "zsh", "bash":
-		return strings.Replace(initTemplate, "wt()", name+"()", 1), nil
+		if name == "wrktree" {
+			return initTemplate, nil
+		}
+		return initTemplate + name + "() {\n  wrktree \"$@\"\n}\n", nil
 	}
 	return "", fmt.Errorf("unsupported shell %q: use zsh or bash", shell)
 }
@@ -48,8 +56,17 @@ func WriteCD(path string, stdout, stderr io.Writer) error {
 	if _, err := fmt.Fprintln(stdout, path); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(stderr, `wrktree: to change directory, add this line to your shell rc file: eval "$(wrktree init zsh)"`)
+	_, err := fmt.Fprintln(stderr, cdHint(os.Getenv("SHELL")))
 	return err
+}
+
+// cdHint returns the setup instruction for the login shell of the user.
+func cdHint(loginShell string) string {
+	sh, rc := "zsh", "~/.zshrc"
+	if filepath.Base(loginShell) == "bash" {
+		sh, rc = "bash", "~/.bashrc"
+	}
+	return fmt.Sprintf(`wrktree: cannot change the directory of your shell. Add this line to %s, then open a new shell: eval "$(wrktree init %s)"`, rc, sh)
 }
 
 // Quote returns s in POSIX single-quote form.

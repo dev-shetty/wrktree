@@ -34,11 +34,11 @@ Then add the shell function to `~/.zshrc` or `~/.bashrc`:
 eval "$(wrktree init zsh)"    # or: wrktree init bash
 ```
 
-Open a new shell. The function is `wt`. To use a different name, add `--name`, for example `wrktree init zsh --name w`.
+Open a new shell. The line adds the short command `wt`. `wt` and `wrktree` do the same thing. To use a different short name, add `--name`, for example `wrktree init zsh --name w`.
 
-The function is optional, but `enter` needs it. A program cannot change the directory of your shell. Thus `wrktree` writes the path to a file, and `wt` does the `cd`.
+The line is optional, but `enter` needs it. A program cannot change the directory of your shell. Thus `wrktree` writes the path to a file, and the shell function does the `cd`.
 
-Without the function, all other keys and commands operate. `enter` and `wrktree switch` only print the path, so you must type `cd "$(wrktree switch <name>)"`.
+Without the line, all other keys and commands operate. `enter` and `wrktree switch` only print the path, so you must type `cd "$(wrktree switch <name>)"`.
 
 ## Use
 
