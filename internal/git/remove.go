@@ -103,9 +103,9 @@ func (r Runner) PruneDryRun(ctx context.Context) ([]string, error) {
 	return lines, nil
 }
 
-// Prune runs "git worktree prune". It does no safety check.
+// Prune runs "git worktree prune -v". It does no safety check.
 func (r Runner) Prune(ctx context.Context) error {
-	_, err := r.Run(ctx, "worktree", "prune")
+	_, err := r.Run(ctx, "worktree", "prune", "-v")
 	return err
 }
 

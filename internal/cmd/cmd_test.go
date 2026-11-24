@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dev-shetty/wrktree/internal/config"
 	"github.com/dev-shetty/wrktree/internal/testrepo"
 )
 
@@ -223,8 +224,19 @@ func TestOpenNotFound(t *testing.T) {
 	// A real exit code 127 from sh.
 	err127 := exec127(t)
 	_, _, err := runWith(t, repo.Dir, runOpts{openErr: err127}, "open", "feat-a")
-	if err == nil || !strings.Contains(err.Error(), "code") || !strings.Contains(err.Error(), "config.toml") {
-		t.Errorf("err = %v", err)
+	want := `open command not found: code -n {path} (set "open" in ` + config.Path() + ")"
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
+	}
+
+	// The error names the full template, not the first word.
+	cfg := config.Path()
+	os.MkdirAll(filepath.Dir(cfg), 0o755)
+	os.WriteFile(cfg, []byte("open = \"cd {path} && claude\"\n"), 0o644)
+	_, _, err = runWith(t, repo.Dir, runOpts{openErr: err127}, "open", "feat-a")
+	want = `open command not found: cd {path} && claude (set "open" in ` + cfg + ")"
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
 	}
 }
 
@@ -259,5 +271,27 @@ func TestLsFetchLocalBase(t *testing.T) {
 	}
 	if !strings.Contains(out, "feat-a") {
 		t.Errorf("out:\n%s", out)
+	}
+}
+
+func TestSwitchOpenMissing(t *testing.T) {
+	repo, feat := twoWorktrees(t)
+	if err := os.RemoveAll(feat); err != nil {
+		t.Fatal(err)
+	}
+	cdFile := filepath.Join(t.TempDir(), "cd")
+	t.Setenv("WRKTREE_CD_FILE", cdFile)
+	out, _, err := run(t, repo.Dir, "switch", "feat-a")
+	if err == nil || err.Error() != "folder is missing: use prune" || out != "" {
+		t.Errorf("switch: err %v, stdout %q", err, out)
+	}
+	if exists(cdFile) {
+		t.Error("switch wrote the cd file")
+	}
+
+	var got opened
+	_, _, err = runWith(t, repo.Dir, runOpts{opened: &got}, "open", "feat-a")
+	if err == nil || err.Error() != "folder is missing: use prune" || got != (opened{}) {
+		t.Errorf("open: err %v, opened %+v", err, got)
 	}
 }

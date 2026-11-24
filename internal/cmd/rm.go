@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -62,9 +63,12 @@ func runRm(c *cobra.Command, env Env, name string, f rmFlags) error {
 			if !env.IsTerminal() {
 				return errors.New("worktree has changes: use --force")
 			}
-			ok = confirm(env, git.DeletePrompt(wt, plan)+"Type yes to delete: ", func(a string) bool { return a == "yes" })
+			ok, err = confirm(env, git.DeletePrompt(wt, plan)+"Type yes to delete: ", func(a string) bool { return a == "yes" })
 		} else {
-			ok = confirm(env, git.DeletePrompt(wt, plan)+"[y/N] ", yesOrY)
+			ok, err = confirm(env, git.DeletePrompt(wt, plan)+"[y/N] ", yesOrY)
+		}
+		if err != nil {
+			return err
 		}
 		if !ok {
 			fmt.Fprintln(env.Stderr, "cancelled")
@@ -95,14 +99,17 @@ func yesOrY(answer string) bool {
 }
 
 // confirm prints prompt on stderr and reads one line from stdin. It returns
-// true only if accept approves the trimmed line. Any read error, EOF
-// included, is an answer that does not continue.
-func confirm(env Env, prompt string, accept func(answer string) bool) bool {
+// true only if accept approves the trimmed line. A last line without a
+// newline is an answer too. A read error, or EOF with no answer, prints
+// "cancelled" and returns errReported, so the exit code is 1.
+func confirm(env Env, prompt string, accept func(answer string) bool) (bool, error) {
 	fmt.Fprint(env.Stderr, prompt)
 	line, err := bufio.NewReader(env.Stdin).ReadString('\n')
-	if err != nil {
+	answer := strings.TrimSpace(line)
+	if err != nil && !(errors.Is(err, io.EOF) && answer != "") {
 		fmt.Fprintln(env.Stderr)
-		return false
+		fmt.Fprintln(env.Stderr, "cancelled")
+		return false, errReported
 	}
-	return accept(strings.TrimSpace(line))
+	return accept(answer), nil
 }

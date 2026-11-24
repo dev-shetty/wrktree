@@ -138,3 +138,16 @@ func TestInitScriptBadName(t *testing.T) {
 		}
 	}
 }
+
+// The open command must not see the cd file: a "wt" call inside it would
+// write to the file of this wrktree call.
+func TestRunOpenDropsCDFile(t *testing.T) {
+	t.Setenv(CDFileEnv, "/tmp/cd-file")
+	out := filepath.Join(t.TempDir(), "out")
+	if err := RunOpen(`printf %s "${WRKTREE_CD_FILE-unset}" > `+Quote(out)+"; : {path}", "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "unset" {
+		t.Errorf("WRKTREE_CD_FILE in the open command = %q, want unset", got)
+	}
+}

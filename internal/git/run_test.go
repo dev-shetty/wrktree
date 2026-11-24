@@ -2,10 +2,15 @@ package git
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dev-shetty/wrktree/internal/testrepo"
 )
 
 func TestCommandFlags(t *testing.T) {
@@ -88,5 +93,30 @@ func TestFetchCommandEnv(t *testing.T) {
 	}
 	if v, _ := envValue(cmd.Env, "GIT_SSH_COMMAND"); v != "ssh -oBatchMode=yes" {
 		t.Errorf("GIT_SSH_COMMAND = %q", v)
+	}
+}
+
+// Open gives ErrNotRepo only for a folder outside a repository. Other git
+// errors keep the git message.
+func TestOpenErrors(t *testing.T) {
+	if _, err := Open(t.TempDir()); !errors.Is(err, ErrNotRepo) {
+		t.Errorf("folder outside a repository: err = %v, want ErrNotRepo", err)
+	}
+	_, err := Open(filepath.Join(t.TempDir(), "missing"))
+	if err == nil || errors.Is(err, ErrNotRepo) || !strings.Contains(err.Error(), "cannot change to") {
+		t.Errorf("missing folder: err = %v, want the git message", err)
+	}
+}
+
+func TestPruneVerbose(t *testing.T) {
+	repo := testrepo.New(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	t.Setenv("GIT_TRACE", trace)
+	if err := (Runner{Dir: repo.Dir}).Prune(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(trace)
+	if err != nil || !strings.Contains(string(b), "built-in: git worktree prune -v") {
+		t.Errorf("trace (%v):\n%s", err, b)
 	}
 }

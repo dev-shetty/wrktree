@@ -18,12 +18,12 @@ var ErrNotRepo = errors.New("not a git repository")
 // Runner runs git commands in one directory.
 type Runner struct{ Dir string }
 
-// Open returns a Runner for dir. It returns ErrNotRepo if dir is not in a repository.
+// Open returns a Runner for dir. It returns ErrNotRepo if git says that dir
+// is not in a repository. Other errors keep the git message.
 func Open(dir string) (Runner, error) {
 	r := Runner{Dir: dir}
 	if _, err := r.Run(context.Background(), "rev-parse", "--git-common-dir"); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if strings.Contains(err.Error(), "not a git repository") {
 			return Runner{}, ErrNotRepo
 		}
 		return Runner{}, err

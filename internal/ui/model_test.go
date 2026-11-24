@@ -709,3 +709,23 @@ func TestFetchLocalBase(t *testing.T) {
 		t.Errorf("fetch failure shows:\n%s", v)
 	}
 }
+
+// TestCursorStartsOnCurrent: on the first load, the cursor is on the row of
+// the current worktree. A reload keeps the row of the cursor.
+func TestCursorStartsOnCurrent(t *testing.T) {
+	d := deps(t)
+	d.Cwd = alertPath + "/sub"
+	m := listed(t, d, "origin/master")
+	if m.cursorPath() != alertPath {
+		t.Fatalf("cursor on %s, want %s", m.cursorPath(), alertPath)
+	}
+	// The cursor mark wins on the row that is both.
+	if l := lineWith(t, m.View(), "eng-6201"); !strings.HasPrefix(l, " › ") {
+		t.Errorf("current row with the cursor: %q", l)
+	}
+	m, _ = keys(t, m, "k")
+	m, _ = send(t, m, worktreesMsg{wts: threeWorktrees(), base: "origin/master"})
+	if m.cursorPath() == alertPath {
+		t.Error("a reload moves the cursor back to the current row")
+	}
+}

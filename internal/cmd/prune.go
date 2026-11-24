@@ -27,9 +27,15 @@ func newPrune(env Env) *cobra.Command {
 				return nil
 			}
 			fmt.Fprintln(env.Stderr, strings.Join(lines, "\n"))
-			if !yes && !confirm(env, fmt.Sprintf("Prune %d entries? [y/N] ", len(lines)), yesOrY) {
-				fmt.Fprintln(env.Stderr, "cancelled")
-				return nil
+			if !yes {
+				ok, err := confirm(env, fmt.Sprintf("Prune %d entries? [y/N] ", len(lines)), yesOrY)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					fmt.Fprintln(env.Stderr, "cancelled")
+					return nil
+				}
 			}
 			if err := s.r.Prune(s.ctx); err != nil {
 				return err

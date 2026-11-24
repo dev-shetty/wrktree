@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dev-shetty/wrktree/internal/config"
 	"github.com/dev-shetty/wrktree/internal/ui"
 )
 
@@ -120,7 +121,8 @@ func TestRootScreenOpen(t *testing.T) {
 	}
 
 	_, _, err = screenRun(t, repo.Dir, true, runOpts{openErr: exec127(t)}, fakeScreen(ui.Result{OpenPath: feat}, nil, nil))
-	if err == nil || !strings.Contains(err.Error(), `open command "code" not found`) || !strings.Contains(err.Error(), "config.toml") {
+	want := `open command not found: code -n {path} (set "open" in ` + config.Path() + ")"
+	if err == nil || err.Error() != want {
 		t.Errorf("err = %v", err)
 	}
 }

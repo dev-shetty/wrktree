@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,8 +79,8 @@ func TestRmCleanAnswers(t *testing.T) {
 		stdin string
 		gone  bool
 	}{
-		{"Y\n", true}, {"YES\n", true}, {" yes \n", true}, {"yes\r\n", true},
-		{"n\n", false}, {"\n", false}, {"ye\n", false}, {"yess\n", false}, {"", false},
+		{"Y\n", true}, {"YES\n", true}, {" yes \n", true}, {"yes\r\n", true}, {"y", true},
+		{"n\n", false}, {"\n", false}, {"ye\n", false}, {"yess\n", false}, {"n", false},
 	} {
 		isolate(t)
 		repo, feat := twoWorktrees(t)
@@ -169,15 +170,42 @@ func TestRmDirtyNoTerminal(t *testing.T) {
 	}
 }
 
-func TestRmDirtyEOF(t *testing.T) {
-	isolate(t)
-	repo, feat := twoWorktrees(t)
-	dirty(t, feat)
-	_, stderr, err := runIn(t, repo.Dir, "", true, "rm", "feat-a")
-	if err != nil || !exists(feat) || !strings.Contains(stderr, "cancelled") {
-		t.Errorf("err %v, exists %v, stderr %q", err, exists(feat), stderr)
+// EOF with no answer cancels with exit code 1.
+func TestRmEOF(t *testing.T) {
+	for _, d := range []bool{false, true} {
+		isolate(t)
+		repo, feat := twoWorktrees(t)
+		if d {
+			dirty(t, feat)
+		}
+		_, stderr, err := runIn(t, repo.Dir, "", true, "rm", "feat-a")
+		if err == nil || !exists(feat) || !strings.HasSuffix(stderr, "\ncancelled\n") {
+			t.Errorf("dirty %v: err %v, exists %v, stderr %q", d, err, exists(feat), stderr)
+		}
+		if strings.Contains(stderr, "wrktree:") {
+			t.Errorf("dirty %v: stderr has an error line: %q", d, stderr)
+		}
 	}
 }
+
+// A read error cancels with exit code 1.
+func TestRmReadError(t *testing.T) {
+	isolate(t)
+	repo, feat := twoWorktrees(t)
+	var stdout, stderr bytes.Buffer
+	c := New(Env{
+		Dir: repo.Dir, Stdin: errReader{}, Stdout: &stdout, Stderr: &stderr,
+		IsTerminal: func() bool { return true },
+	})
+	c.SetArgs([]string{"rm", "feat-a"})
+	if err := c.Execute(); err == nil || !exists(feat) || !strings.HasSuffix(stderr.String(), "cancelled\n") {
+		t.Errorf("err %v, exists %v, stderr %q", err, exists(feat), stderr.String())
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
 
 func TestRmForce(t *testing.T) {
 	isolate(t)
@@ -438,7 +466,7 @@ func TestPruneEOFCancels(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, stderr, err := runIn(t, repo.Dir, "", false, "prune")
-	if err != nil || !strings.Contains(stderr, "cancelled") {
+	if err == nil || !strings.HasSuffix(stderr, "\ncancelled\n") {
 		t.Errorf("err %v, stderr %q", err, stderr)
 	}
 	out, _, _ := runIn(t, repo.Dir, "", false, "ls")

@@ -188,11 +188,7 @@ func (s *session) openPath(path string) error {
 	err := s.env.RunOpen(s.cfg.Open, path)
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 127 {
-		prog := s.cfg.Open
-		if f := strings.Fields(prog); len(f) > 0 {
-			prog = f[0]
-		}
-		return fmt.Errorf("open command %q not found: set open in %s", prog, config.Path())
+		return fmt.Errorf("open command not found: %s (set \"open\" in %s)", s.cfg.Open, config.Path())
 	}
 	return err
 }
@@ -239,6 +235,15 @@ func (s *session) find(name string) (git.Worktree, error) {
 		}
 		fmt.Fprint(s.env.Stderr, b.String())
 		return git.Worktree{}, errReported
+	}
+	return w, err
+}
+
+// findExisting is find for a worktree whose folder must exist.
+func (s *session) findExisting(name string) (git.Worktree, error) {
+	w, err := s.find(name)
+	if err == nil && w.Prunable {
+		return git.Worktree{}, errors.New("folder is missing: use prune")
 	}
 	return w, err
 }
@@ -305,7 +310,7 @@ func newSwitch(env Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			w, err := s.find(args[0])
+			w, err := s.findExisting(args[0])
 			if err != nil {
 				return err
 			}
@@ -324,7 +329,7 @@ func newOpen(env Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			w, err := s.find(args[0])
+			w, err := s.findExisting(args[0])
 			if err != nil {
 				return err
 			}

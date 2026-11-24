@@ -233,6 +233,10 @@ func (m Model) setWorktrees(msg worktreesMsg) (tea.Model, tea.Cmd) {
 		m.rows = append(m.rows, r)
 	}
 	status.Sort(m.rows)
+	// On the first load, the cursor starts on the current worktree.
+	if m.cursor == "" && cur >= 0 {
+		m.cursor = msg.wts[cur].Path
+	}
 	m.d.Cache.Retain(m.d.Repo, paths)
 	_ = m.d.Cache.Save()
 	m.fixCursor()
@@ -436,10 +440,14 @@ func (m *Model) move(delta int) {
 // busyKey handles a key while a delete or prune step runs. No key can
 // change the mode or move the cursor. ctrl+c quits. q and esc quit only
 // while the step reads: a quit during a delete can leave the shell in a
-// deleted directory.
+// deleted directory. Thus ctrl+c during the delete of the current worktree
+// changes to the main worktree.
 func (m Model) busyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
+		if m.writing && m.del.current && m.del.main != "" {
+			m.result = Result{SwitchPath: m.del.main}
+		}
 		return m, tea.Quit
 	case "q", "esc":
 		if !m.writing {

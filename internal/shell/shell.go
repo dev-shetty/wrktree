@@ -66,10 +66,16 @@ func OpenCommand(template, path string) string {
 }
 
 // RunOpen runs the open command with `sh -c`. The command uses the
-// stdin, stdout, and stderr of this process. If the command is not
-// found, the error is an *exec.ExitError with exit code 127.
+// stdin, stdout, and stderr of this process. It does not get CDFileEnv,
+// so a wt call inside it cannot write the file of this call. If the
+// command is not found, the error is an *exec.ExitError with exit code 127.
 func RunOpen(template, path string) error {
 	cmd := exec.Command("sh", "-c", OpenCommand(template, path))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); k != CDFileEnv {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
 	return cmd.Run()
 }

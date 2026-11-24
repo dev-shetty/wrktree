@@ -698,3 +698,70 @@ func TestDeleteNestedBlocked(t *testing.T) {
 		t.Error("a folder is gone")
 	}
 }
+
+// TestCtrlCWhileCurrentDeleteRuns: ctrl+c during the delete of the current
+// worktree quits with a change to the main worktree. The shell must not
+// stay in a deleted directory.
+func TestCtrlCWhileCurrentDeleteRuns(t *testing.T) {
+	d := deps(t)
+	d.Cwd = alertPath
+	m := listed(t, d, "origin/master")
+	m.cursor = alertPath
+	m, _ = keys(t, m, "d")
+	m, _ = send(t, m, planMsg{wt: m.row(alertPath).WT})
+	m, cmd := keys(t, m, "y")
+	if cmd == nil {
+		t.Fatal("y starts no delete")
+	}
+	m, cmd = keys(t, m, "ctrl+c")
+	if !isQuit(cmd) || m.Result() != (Result{SwitchPath: mainPath}) {
+		t.Errorf("quit %v, Result %+v; want SwitchPath %s", isQuit(cmd), m.Result(), mainPath)
+	}
+
+	// ctrl+c during the delete of another worktree changes nothing.
+	m = loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d")
+	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT})
+	m, _ = keys(t, m, "y")
+	m, cmd = keys(t, m, "ctrl+c")
+	if !isQuit(cmd) || m.Result() != (Result{}) {
+		t.Errorf("other worktree: quit %v, Result %+v", isQuit(cmd), m.Result())
+	}
+}
+
+// TestDeleteDetachedUnreachable: commits that no branch contains need the
+// typed yes. A plain y does not delete.
+func TestDeleteDetachedUnreachable(t *testing.T) {
+	repo := testrepo.New(t)
+	det := filepath.Join(filepath.Dir(repo.Dir), "det")
+	repo.Git(t, repo.Dir, "worktree", "add", "--detach", det)
+	repo.Commit(t, det, "a.txt")
+	det = realPath(t, det)
+	head := repo.Git(t, det, "rev-parse", "HEAD")
+	m, _ := repoModel(t, repo, repo.Dir, true)
+
+	m = pressD(t, m, det)
+	if m.del.plan.Unreachable != 1 || !m.del.plan.NeedsYes || m.mode != modeTyped {
+		t.Fatalf("plan %+v, mode %v", m.del.plan, m.mode)
+	}
+	if v := m.View(); !strings.Contains(v, head[:7]+" has 1 commit that no branch contains.") || !strings.Contains(v, "Type yes to delete: ") {
+		t.Fatalf("typed prompt:\n%s", v)
+	}
+	m2, cmd := keys(t, m, "y")
+	if cmd != nil || m2.mode != modeTyped {
+		t.Fatalf("y starts a command or leaves the prompt: mode %v", m2.mode)
+	}
+	if _, cmd = keys(t, m2, "enter"); cmd != nil {
+		t.Error("y + enter starts a command")
+	}
+	if !exists(det) {
+		t.Fatal("folder deleted without yes")
+	}
+
+	m, cmd = keys(t, m, "y", "e", "s", "enter")
+	msg, ok := run(t, cmd).(removedMsg)
+	if !ok || msg.err != nil || exists(det) {
+		t.Fatalf("removedMsg = %+v, folder exists %v", msg, exists(det))
+	}
+}
