@@ -85,6 +85,7 @@ type Model struct {
 	typed      string   // text of the typed delete prompt
 	pruneLines []string // stale entries that the prune prompt shows
 	busy       string   // text of the delete or prune step that runs; "" = none
+	writing    bool     // the step that runs changes the repository
 }
 
 // New returns a screen that loads its rows when it starts.
@@ -132,7 +133,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pruneListMsg:
 		return m.pruneListed(msg)
 	case prunedMsg:
-		m.busy = ""
+		m.busy, m.writing = "", false
 		if msg.err != nil {
 			m.note = "prune failed: " + msg.err.Error()
 			return m, nil
@@ -308,6 +309,9 @@ func (m Model) sizeDone(msg sizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.busy != "" {
+		return m.busyKey(msg)
+	}
 	switch msg.String() {
 	case "up", "k":
 		m.move(-1)
@@ -328,10 +332,8 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		return m.startDelete()
 	case "p":
-		if m.busy == "" {
-			m.busy = "reading stale entries"
-			return m, pruneListCmd(m.d.Git)
-		}
+		m.busy = "reading stale entries"
+		return m, pruneListCmd(m.d.Git)
 	case "/":
 		m.mode = modeFilter
 	case "q", "esc", "ctrl+c":
@@ -431,6 +433,30 @@ func (m *Model) move(delta int) {
 	m.cursor = vis[i].WT.Path
 }
 
+// busyKey handles a key while a delete or prune step runs. No key can
+// change the mode or move the cursor. ctrl+c quits. q and esc quit only
+// while the step reads: a quit during a delete can leave the shell in a
+// deleted directory.
+func (m Model) busyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "q", "esc":
+		if !m.writing {
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+// cursorPath returns the path of the cursor row, or "" if no row shows.
+func (m Model) cursorPath() string {
+	if i := m.cursorIndex(); i >= 0 {
+		return m.visible()[i].WT.Path
+	}
+	return ""
+}
+
 // mainPath returns the path of the main worktree, or "" if no row is main.
 func (m Model) mainPath() string {
 	for _, r := range m.rows {
@@ -463,6 +489,11 @@ func (m Model) planDone(msg planMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case msg.plan.Blocked != "":
 		m.note = msg.plan.Blocked
+		return m, nil
+	}
+	// Open the prompt only for the row that the user sees and selected.
+	if m.mode != modeList || m.cursorPath() != msg.wt.Path {
+		m.note = cancelledNote
 		return m, nil
 	}
 	main := m.mainPath()
@@ -546,14 +577,15 @@ func (m Model) runDelete() (tea.Model, tea.Cmd) {
 	if m.del.main != "" {
 		r = r.In(m.del.main)
 	}
-	m.busy = "deleting " + m.del.wt.Path
+	m.busy, m.writing = "deleting "+m.del.wt.Path, true
 	return m, removeCmd(r, m.del.wt, m.del.plan.NeedsYes, m.del.branch && m.del.wt.Branch != "")
 }
 
 // removed removes the row of a deleted worktree and its cache entry. After
 // the delete of the current worktree, the shell changes to the main worktree.
 func (m Model) removed(msg removedMsg) (tea.Model, tea.Cmd) {
-	m.busy = ""
+	del := m.del
+	m.busy, m.writing, m.del = "", false, deleteState{}
 	if msg.err != nil {
 		m.note = "delete failed: " + msg.err.Error()
 		return m, nil
@@ -580,8 +612,8 @@ func (m Model) removed(msg removedMsg) (tea.Model, tea.Cmd) {
 	if msg.branchErr != nil {
 		m.note += ", but the branch stays: " + msg.branchErr.Error()
 	}
-	if m.del.current && m.del.wt.Path == msg.path {
-		m.result = Result{SwitchPath: m.del.main}
+	if del.current && del.wt.Path == msg.path {
+		m.result = Result{SwitchPath: del.main}
 		if msg.branchErr != nil {
 			m.result.Message = m.note
 		}
@@ -597,6 +629,8 @@ func (m Model) pruneListed(msg pruneListMsg) (tea.Model, tea.Cmd) {
 		m.note = "prune failed: " + msg.err.Error()
 	case len(msg.lines) == 0:
 		m.note = "nothing to prune"
+	case m.mode != modeList:
+		m.note = cancelledNote
 	default:
 		m.pruneLines = msg.lines
 		m.mode = modePrune
@@ -613,7 +647,7 @@ func (m Model) pruneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.busy != "" {
 			return m, nil
 		}
-		m.busy = "pruning"
+		m.busy, m.writing = "pruning", true
 		return m, pruneCmd(m.d.Git, n)
 	case "ctrl+c":
 		return m, tea.Quit

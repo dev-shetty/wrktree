@@ -527,3 +527,148 @@ func TestPruneConfirm(t *testing.T) {
 		t.Errorf("rows after prune: %d", len(m.rows))
 	}
 }
+
+// TestKeysWaitForPlan: between d and the prompt, no key can change the
+// mode or move the cursor. A filter key must never answer a prompt.
+func TestKeysWaitForPlan(t *testing.T) {
+	m := loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d")
+	for _, k := range []string{"/", "y", "e", "s", "enter", "o", "f", "r", "p", "d", "j", "k", "up", "down"} {
+		var cmd tea.Cmd
+		m, cmd = keys(t, m, k)
+		if cmd != nil {
+			t.Errorf("%s while a plan runs starts a command", k)
+		}
+	}
+	if m.mode != modeList || m.filter != "" || m.cursor != flowsPath || m.Result() != (Result{}) {
+		t.Fatalf("keys changed the state: mode %v, filter %q, cursor %s", m.mode, m.filter, m.cursor)
+	}
+	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT})
+	if !strings.Contains(m.View(), cleanHint) {
+		t.Fatalf("prompt does not show:\n%s", m.View())
+	}
+	if _, cmd := keys(t, m, "y"); cmd == nil {
+		t.Error("y on the visible prompt does not delete")
+	}
+}
+
+func TestQuitWhilePlanRuns(t *testing.T) {
+	for _, k := range []string{"q", "esc", "ctrl+c"} {
+		m := loaded(t)
+		m, _ = keys(t, m, "d")
+		if _, cmd := keys(t, m, k); !isQuit(cmd) {
+			t.Errorf("%s while a plan runs does not quit", k)
+		}
+		m = loaded(t)
+		m, _ = keys(t, m, "p")
+		if _, cmd := keys(t, m, k); !isQuit(cmd) {
+			t.Errorf("%s while a prune list runs does not quit", k)
+		}
+	}
+}
+
+func TestPlanForOtherRowCancels(t *testing.T) {
+	m := loaded(t)
+	m.cursor = flowsPath
+	m, _ = send(t, m, planMsg{wt: m.row(alertPath).WT})
+	if inPrompt(m) || m.mode != modeList || !strings.Contains(m.View(), "cancelled") {
+		t.Errorf("plan for another row opens a prompt:\n%s", m.View())
+	}
+	if _, cmd := keys(t, m, "y"); cmd != nil {
+		t.Error("y starts a command")
+	}
+}
+
+func TestPlanInFilterModeCancels(t *testing.T) {
+	m := loaded(t)
+	m.cursor = flowsPath
+	m.mode = modeFilter
+	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: git.DeletePlan{Changed: 1, NeedsYes: true}})
+	if m.mode != modeFilter || inPrompt(m) {
+		t.Fatalf("plan in filter mode opens a prompt:\n%s", m.View())
+	}
+	m, cmd := keys(t, m, "y", "e", "s", "enter")
+	if cmd != nil || m.Result() != (Result{}) {
+		t.Error("filter keys start a command")
+	}
+}
+
+func TestPruneKeysWaitForList(t *testing.T) {
+	m := loaded(t)
+	m, _ = keys(t, m, "p")
+	m, cmd := keys(t, m, "/")
+	if cmd != nil || m.mode != modeList {
+		t.Fatalf("/ while a prune list runs: mode %v", m.mode)
+	}
+	m, _ = send(t, m, pruneListMsg{lines: []string{"Removing worktrees/x: gitdir file points to non-existent location"}})
+	if !strings.Contains(m.View(), "Prune 1 entries? y/N") {
+		t.Fatalf("no prune prompt:\n%s", m.View())
+	}
+	if _, cmd := keys(t, m, "x"); cmd != nil {
+		t.Error("x prunes")
+	}
+
+	m = loaded(t)
+	m.mode = modeFilter
+	m, _ = send(t, m, pruneListMsg{lines: []string{"Removing worktrees/x"}})
+	if m.mode != modeFilter || strings.Contains(m.View(), "Prune 1 entries") {
+		t.Fatalf("prune list in filter mode opens a prompt:\n%s", m.View())
+	}
+	if _, cmd := keys(t, m, "y"); cmd != nil {
+		t.Error("filter y prunes")
+	}
+}
+
+func TestQuitBlockedWhileDeleteRuns(t *testing.T) {
+	m := loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d")
+	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT})
+	m, cmd := keys(t, m, "y")
+	if cmd == nil {
+		t.Fatal("y starts no delete")
+	}
+	for _, k := range []string{"q", "esc", "r", "enter"} {
+		if _, cmd := keys(t, m, k); cmd != nil {
+			t.Errorf("%s while a delete runs returns a command", k)
+		}
+	}
+	if _, cmd := keys(t, m, "ctrl+c"); !isQuit(cmd) {
+		t.Error("ctrl+c while a delete runs does not quit")
+	}
+	m, _ = send(t, m, removedMsg{path: flowsPath, err: errors.New("boom")})
+	if m.del != (deleteState{}) {
+		t.Errorf("del not reset after a failed delete: %+v", m.del)
+	}
+}
+
+func TestQuitBlockedWhilePruneRuns(t *testing.T) {
+	m := loaded(t)
+	m, _ = keys(t, m, "p")
+	m, _ = send(t, m, pruneListMsg{lines: []string{"Removing worktrees/x"}})
+	m, cmd := keys(t, m, "y")
+	if cmd == nil {
+		t.Fatal("y starts no prune")
+	}
+	for _, k := range []string{"q", "esc", "r"} {
+		if _, cmd := keys(t, m, k); cmd != nil {
+			t.Errorf("%s while a prune runs returns a command", k)
+		}
+	}
+	if _, cmd := keys(t, m, "ctrl+c"); !isQuit(cmd) {
+		t.Error("ctrl+c while a prune runs does not quit")
+	}
+}
+
+func TestDelResetAfterDelete(t *testing.T) {
+	m := loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d")
+	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT})
+	m, _ = keys(t, m, "y")
+	m, _ = send(t, m, removedMsg{path: flowsPath})
+	if m.del != (deleteState{}) {
+		t.Errorf("del not reset: %+v", m.del)
+	}
+}
