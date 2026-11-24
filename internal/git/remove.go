@@ -98,3 +98,38 @@ func (r Runner) Prune(ctx context.Context) error {
 	_, err := r.Run(ctx, "worktree", "prune")
 	return err
 }
+
+// DeletePrompt returns the text that asks the user to confirm the delete of
+// wt. It does not contain the end part: the caller adds "[y/N] " when
+// plan.NeedsYes is false, or "Type yes to delete: " when it is true.
+func DeletePrompt(wt Worktree, p DeletePlan) string {
+	label := wt.Branch
+	if label == "" {
+		label = wt.Head
+		if len(label) > 7 {
+			label = label[:7]
+		}
+	}
+	if !p.NeedsYes {
+		return fmt.Sprintf("Delete worktree %s at %s? Ignored files are deleted too. ", label, wt.Path)
+	}
+	var lost []string
+	if p.Changed > 0 {
+		lost = append(lost, plural(p.Changed, "changed file", "changed files"))
+	}
+	if p.Unreachable > 0 {
+		lost = append(lost, plural(p.Unreachable, "commit", "commits"))
+	}
+	text := label + " has " + strings.Join(lost, " and ")
+	if p.Unreachable > 0 {
+		text += " that no branch contains"
+	}
+	return text + ". They will be lost. Ignored files are deleted too. "
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}

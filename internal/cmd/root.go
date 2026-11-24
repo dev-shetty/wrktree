@@ -79,7 +79,7 @@ func New(env Env) *cobra.Command {
 	root.SetIn(env.Stdin)
 	root.SetOut(env.Stdout)
 	root.SetErr(env.Stderr)
-	root.AddCommand(newLs(env), newSwitch(env), newOpen(env), newInit(env))
+	root.AddCommand(newLs(env), newSwitch(env), newOpen(env), newInit(env), newRm(env), newPrune(env))
 	return root
 }
 
