@@ -660,8 +660,8 @@ func TestCommands(t *testing.T) {
 	if c := fetchCmd(r, "origin/master")().(fetchMsg); c.err != nil {
 		t.Errorf("fetch: %v", c.err)
 	}
-	if c := fetchCmd(r, "nowhere")().(fetchMsg); c.err == nil {
-		t.Error("fetch of a base with no remote must fail")
+	if c := fetchCmd(r, "nowhere")().(fetchMsg); c.err != nil {
+		t.Errorf("a base with no remote ref is not fetched: %v", c.err)
 	}
 }
 
@@ -676,5 +676,36 @@ func TestCommandsNoBase(t *testing.T) {
 	msg := New(d).Init()().(worktreesMsg)
 	if msg.err != nil || msg.base != "" || len(msg.wts) != 1 {
 		t.Errorf("Init with no origin: %+v", msg)
+	}
+}
+
+// TestFetchLocalBase: with base = "master", the fetch on open is skipped
+// with no error, and the screen shows no fetch failure.
+func TestFetchLocalBase(t *testing.T) {
+	repo := testrepo.New(t)
+	r, err := git.Open(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := deps(t)
+	d.Git = r
+	d.Cfg.Base = "master"
+	m := New(d)
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	msg := m.Init()().(worktreesMsg)
+	if msg.err != nil || msg.base != "master" {
+		t.Fatalf("Init: %+v", msg)
+	}
+	m, _ = send(t, m, msg)
+	if !m.fetching {
+		t.Fatal("no fetch on open")
+	}
+	f, ok := fetchCmd(r, m.base)().(fetchMsg)
+	if !ok || f.err != nil {
+		t.Fatalf("fetch: %+v", f)
+	}
+	m, _ = send(t, m, f)
+	if v := m.View(); m.fetchFailed || strings.Contains(v, "fetch failed") {
+		t.Errorf("fetch failure shows:\n%s", v)
 	}
 }

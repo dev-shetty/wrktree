@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,5 +109,45 @@ func TestFetchBase(t *testing.T) {
 	_, behind, err = r.Distance(ctx, repo.Dir, "origin/master")
 	if err != nil || behind != 1 {
 		t.Fatalf("after: behind = %d, err = %v", behind, err)
+	}
+}
+
+// A base with no remote-tracking ref is not fetched, and that is no error.
+func TestFetchBaseLocalBase(t *testing.T) {
+	ctx := context.Background()
+	repo := testrepo.New(t)
+	repo.Git(t, repo.Dir, "branch", "feature/x")
+	r := open(t, repo.Dir)
+	trace := filepath.Join(t.TempDir(), "trace")
+	t.Setenv("GIT_TRACE", trace)
+	for _, base := range []string{"master", "feature/x"} {
+		if err := r.FetchBase(ctx, base); err != nil {
+			t.Errorf("FetchBase(%q) = %v, want nil", base, err)
+		}
+	}
+	if b, _ := os.ReadFile(trace); strings.Contains(string(b), "built-in: git fetch") {
+		t.Errorf("a fetch ran:\n%s", b)
+	}
+}
+
+// The remote is the longest configured remote name that starts the base.
+func TestFetchBaseRemoteWithSlash(t *testing.T) {
+	ctx := context.Background()
+	repo := testrepo.New(t)
+	repo.Git(t, repo.Dir, "remote", "add", "up", filepath.Join(t.TempDir(), "missing.git"))
+	repo.Git(t, repo.Dir, "remote", "add", "up/stream", repo.Origin)
+	repo.Git(t, repo.Dir, "fetch", "up/stream")
+
+	other := filepath.Join(t.TempDir(), "other")
+	repo.Git(t, filepath.Dir(other), "clone", repo.Origin, other)
+	repo.Commit(t, other, "remote.txt")
+	repo.Git(t, other, "push", "origin", "master")
+
+	r := open(t, repo.Dir)
+	if err := r.FetchBase(ctx, "up/stream/master"); err != nil {
+		t.Fatal(err)
+	}
+	if _, behind, err := r.Distance(ctx, repo.Dir, "up/stream/master"); err != nil || behind != 1 {
+		t.Errorf("behind = %d, err = %v; want 1", behind, err)
 	}
 }

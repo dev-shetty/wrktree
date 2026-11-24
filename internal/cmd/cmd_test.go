@@ -244,3 +244,20 @@ func TestInit(t *testing.T) {
 		t.Error("bad name: want error")
 	}
 }
+
+// A base with no remote part is not fetched, and ls shows no failure.
+func TestLsFetchLocalBase(t *testing.T) {
+	repo, _ := twoWorktrees(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cfg := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "wrktree", "config.toml")
+	os.MkdirAll(filepath.Dir(cfg), 0o755)
+	os.WriteFile(cfg, []byte("base = \"master\"\n"), 0o644)
+	out, stderr, err := runWith(t, repo.Dir, runOpts{}, "ls", "--fetch")
+	if err != nil || stderr != "" {
+		t.Errorf("err %v, stderr %q", err, stderr)
+	}
+	if !strings.Contains(out, "feat-a") {
+		t.Errorf("out:\n%s", out)
+	}
+}

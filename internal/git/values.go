@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -78,12 +79,33 @@ func (r Runner) LastCommit(ctx context.Context, path string) (time.Time, error) 
 	return time.Unix(sec, 0), nil
 }
 
-// FetchBase fetches the branch of base. "origin/master" runs "git fetch origin master".
+// FetchBase fetches the branch of base. "origin/master" runs
+// "git fetch origin master". A base with no remote-tracking ref, for example
+// a local branch "main", is not fetched, and that is no error. The remote is
+// the longest configured remote name that base starts with, so a remote or a
+// branch can contain a slash.
 func (r Runner) FetchBase(ctx context.Context, base string) error {
-	remote, branch, ok := strings.Cut(base, "/")
-	if !ok {
-		return fmt.Errorf("base %q has no remote", base)
+	_, err := r.Run(ctx, "rev-parse", "--verify", "--quiet", "refs/remotes/"+base)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return nil
 	}
-	_, err := r.Run(ctx, "fetch", remote, branch)
+	if err != nil {
+		return err
+	}
+	out, err := r.Run(ctx, "remote")
+	if err != nil {
+		return err
+	}
+	remote := ""
+	for _, name := range strings.Fields(out) {
+		if strings.HasPrefix(base, name+"/") && len(name) > len(remote) {
+			remote = name
+		}
+	}
+	if remote == "" {
+		return fmt.Errorf("base %q matches no configured remote", base)
+	}
+	_, err = r.Run(ctx, "fetch", remote, strings.TrimPrefix(base, remote+"/"))
 	return err
 }
