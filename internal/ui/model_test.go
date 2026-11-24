@@ -10,10 +10,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/dev-shetty/wrktree/internal/config"
 	"github.com/dev-shetty/wrktree/internal/disk"
 	"github.com/dev-shetty/wrktree/internal/git"
+	"github.com/dev-shetty/wrktree/internal/status"
 	"github.com/dev-shetty/wrktree/internal/testrepo"
 )
 
@@ -545,6 +547,34 @@ func TestCutKeepsMarks(t *testing.T) {
 	m, _ = send(t, m, worktreesMsg{wts: wts, base: "origin/master"})
 	if l := lineWith(t, m.View(), "eng-6201"); !strings.Contains(l, "… [locked] [missing]") {
 		t.Errorf("cut row must keep the marks: %q", l)
+	}
+	// The label with its marks fills the width exactly: no mark is cut.
+	r := status.Row{WT: git.Worktree{Path: "/r/other-folder", Branch: "feat", Locked: true, Prunable: true}}
+	label := status.Label(r)
+	if got := branchCell(r, lipgloss.Width(label)); got != label {
+		t.Errorf("branchCell at the label width = %q, want %q", got, label)
+	}
+}
+
+// TestDimUsesScreenRenderer forces a color profile on the renderer of the
+// screen. The lipgloss default renderer stays as it is.
+func TestDimUsesScreenRenderer(t *testing.T) {
+	old := renderer.ColorProfile()
+	renderer.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { renderer.SetColorProfile(old) })
+
+	d := deps(t)
+	d.Cache.Set(repoPath, alertPath, 1503238554, now.Add(-25*time.Hour))
+	m := listed(t, d, "origin/master")
+	const faint = "\x1b[2m"
+	if l := lineWith(t, m.View(), "eng-6201"); !strings.Contains(l, faint+"~1.4 GB") {
+		t.Errorf("stale size is not faint: %q", l)
+	}
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: 40, Height: 20})
+	for _, l := range strings.Split(m.View(), "\n") {
+		if lipgloss.Width(l) > 40 {
+			t.Errorf("styled line too wide (%d): %q", lipgloss.Width(l), l)
+		}
 	}
 }
 

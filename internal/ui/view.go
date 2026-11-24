@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -26,7 +27,11 @@ const (
 	chromeLines = 6
 )
 
-var dim = lipgloss.NewStyle().Faint(true)
+// renderer draws the screen. The screen is on stderr, so stderr decides
+// the color profile.
+var renderer = lipgloss.NewRenderer(os.Stderr)
+
+var dim = renderer.NewStyle().Faint(true)
 
 // cell is one table cell. Text is plain. Dim draws it faint.
 type cell struct {
@@ -55,7 +60,7 @@ func (m Model) View() string {
 	} else {
 		lines = append(lines, keyFooter)
 	}
-	cut := lipgloss.NewStyle().MaxWidth(w)
+	cut := renderer.NewStyle().MaxWidth(w)
 	for i, l := range lines {
 		if lipgloss.Width(l) > w {
 			lines[i] = cut.Render(l)
@@ -255,7 +260,8 @@ func branchCell(r status.Row, width int) string {
 		return pad(label, width)
 	case lipgloss.Width(full) <= width:
 		return label + " " + dim.Render(note) + strings.Repeat(" ", width-lipgloss.Width(full))
-	case lipgloss.Width(label) <= width:
+	case lipgloss.Width(label) < width:
+		// The cut keeps width-1 columns, so all of the label stays.
 		return pad(ellipsize(full, width), width)
 	}
 	plain := r
