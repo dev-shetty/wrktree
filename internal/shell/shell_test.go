@@ -125,3 +125,16 @@ func TestInitScript(t *testing.T) {
 		}
 	}
 }
+
+func TestInitScriptBadName(t *testing.T) {
+	for _, name := range []string{"", "1wt", "w t", "wt;rm", "w-t", "wt()", "$(x)"} {
+		if _, err := InitScript("zsh", name); err == nil {
+			t.Errorf("name %q: want error", name)
+		}
+	}
+	for _, name := range []string{"wt", "_w", "W9_x"} {
+		if _, err := InitScript("bash", name); err != nil {
+			t.Errorf("name %q: %v", name, err)
+		}
+	}
+}

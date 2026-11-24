@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -22,8 +23,14 @@ const initTemplate = `wt() {
 }
 `
 
+var funcName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // InitScript returns the shell function text for shell, named name.
+// The name must match ^[A-Za-z_][A-Za-z0-9_]*$.
 func InitScript(shell, name string) (string, error) {
+	if !funcName.MatchString(name) {
+		return "", fmt.Errorf("invalid function name %q: use letters, digits, and underscores", name)
+	}
 	switch shell {
 	case "zsh", "bash":
 		return strings.Replace(initTemplate, "wt()", name+"()", 1), nil
