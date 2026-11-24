@@ -226,7 +226,7 @@ func TestSyncRowWidth(t *testing.T) {
 }
 
 func TestKeyFooterText(t *testing.T) {
-	const want = " enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit"
+	const want = " enter switch · o open · c copy · s sync · d delete · D delete folder + branch · f fetch · / filter · q quit"
 	m := loaded(t)
 	m, _ = send(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
 	if !strings.Contains(m.View(), "\n"+want) {

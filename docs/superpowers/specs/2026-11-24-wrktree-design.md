@@ -111,7 +111,7 @@ If the current directory is not in a git repository, each command prints
    eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit
+ enter switch · o open · c copy · s sync · d delete · D delete folder + branch · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory. `›` marks the cursor.

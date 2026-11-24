@@ -19,7 +19,7 @@ const (
 	currentMark  = "●"
 	pending      = "…"
 	fetchFailed  = "fetch failed: distances can be stale"
-	keyFooter    = " enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit"
+	keyFooter    = " enter switch · o open · c copy · s sync · d delete · D delete folder + branch · f fetch · / filter · q quit"
 	keySep       = " · "
 	filterFooter = " enter keep filter · esc clear filter"
 	typedLabel   = "Type yes to delete: "
