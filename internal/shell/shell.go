@@ -91,9 +91,12 @@ var clipboardTools = [][]string{
 
 // Copy puts text on the system clipboard. It runs the first tool of
 // clipboardTools that is on PATH, with text on stdin and no trailing newline.
-// The tool gets no stdout or stderr pipe: xclip and xsel stay in the
+// If a tool fails, Copy tries the next one: wl-copy fails in an X11 session,
+// where xclip can operate. If all tools fail, the error is that of the last
+// one. The tool gets no stdout or stderr pipe: xclip and xsel stay in the
 // background to serve the clipboard, and a pipe would make Copy wait for them.
 func Copy(text string) error {
+	var failed error
 	for _, tool := range clipboardTools {
 		path, err := exec.LookPath(tool[0])
 		if err != nil {
@@ -102,9 +105,13 @@ func Copy(text string) error {
 		cmd := exec.Command(path, tool[1:]...)
 		cmd.Stdin = strings.NewReader(text)
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s: %w", tool[0], err)
+			failed = fmt.Errorf("%s: %w", tool[0], err)
+			continue
 		}
 		return nil
+	}
+	if failed != nil {
+		return failed
 	}
 	return errors.New("no clipboard tool found (pbcopy, wl-copy, xclip, xsel)")
 }
