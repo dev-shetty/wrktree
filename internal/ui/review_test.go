@@ -111,3 +111,30 @@ func TestGitRunsInMainAfterCurrentDelete(t *testing.T) {
 		t.Errorf("fetch after the delete of the current worktree: %v", err)
 	}
 }
+
+// d on a clean worktree with a submodule opens the typed prompt. The typed
+// yes deletes with --force.
+func TestDeleteSubmoduleNeedsTypedYes(t *testing.T) {
+	repo := testrepo.New(t)
+	repo.AddSubmodule(t)
+	feat := realPath(t, repo.AddWorktree(t, "feat-sub"))
+	repo.InitSubmodules(t, feat)
+	m, _ := repoModel(t, repo, realPath(t, repo.Dir), true)
+	m, cmd := press(t, m, feat, "d")
+	if cmd != nil || !inPrompt(m) {
+		t.Fatalf("d on a worktree with a submodule: cmd %v, prompt %v\n%s", cmd != nil, inPrompt(m), m.View())
+	}
+	if v := m.View(); !strings.Contains(v, "feat-sub has a submodule.") {
+		t.Errorf("the prompt does not name the submodule:\n%s", v)
+	}
+	m, cmd = keys(t, m, "y", "e", "s", "enter")
+	var msg removedMsg
+	for _, got := range msgs(cmd) {
+		if r, ok := got.(removedMsg); ok {
+			msg = r
+		}
+	}
+	if msg.path != feat || msg.err != nil || exists(feat) {
+		t.Fatalf("removedMsg = %+v, folder exists %v", msg, exists(feat))
+	}
+}

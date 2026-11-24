@@ -3,7 +3,10 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -13,7 +16,8 @@ type DeletePlan struct {
 	Blocked     string // reason. Empty = delete is possible.
 	Changed     int
 	Unreachable int  // commits of a detached HEAD that no branch, remote ref, or tag contains
-	NeedsYes    bool // Changed > 0 || Unreachable > 0
+	Submodule   bool // the worktree has an initialized submodule: git deletes it only with --force
+	NeedsYes    bool // Changed > 0 || Unreachable > 0 || Submodule
 }
 
 // PlanDelete checks a worktree. The order of checks is: main, locked, missing
@@ -51,8 +55,49 @@ func (r Runner) PlanDelete(ctx context.Context, wt Worktree) (DeletePlan, error)
 			return DeletePlan{}, err
 		}
 	}
-	p.NeedsYes = p.Changed > 0 || p.Unreachable > 0
+	if p.Submodule, err = r.HasSubmodule(ctx, wt.Path); err != nil {
+		return DeletePlan{}, err
+	}
+	p.NeedsYes = p.Changed > 0 || p.Unreachable > 0 || p.Submodule
 	return p, nil
+}
+
+// HasSubmodule reports whether git refuses "git worktree remove" without
+// --force for the worktree at path because of a submodule. Git refuses if
+// the git directory of the worktree has a submodule repository, or if a
+// submodule entry of the index is initialized: its folder has a ".git". A
+// submodule that is not initialized does not count.
+func (r Runner) HasSubmodule(ctx context.Context, path string) (bool, error) {
+	g := r.In(path)
+	dir, err := g.Run(ctx, "rev-parse", "--git-path", "modules")
+	if err != nil {
+		return false, err
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(path, dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if len(entries) > 0 {
+		return true, nil
+	}
+	// Each entry is "<mode> <object> <stage>\t<file>", and -z ends it with NUL.
+	out, err := g.Run(ctx, "ls-files", "--stage", "-z")
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range strings.Split(out, "\x00") {
+		meta, file, ok := strings.Cut(entry, "\t")
+		if !ok || !strings.HasPrefix(meta, "160000 ") {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(path, file, ".git")); err == nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // UnreachableCommits counts the commits of HEAD in the worktree at path that
@@ -124,11 +169,18 @@ func DeletePrompt(wt Worktree, p DeletePlan) string {
 	if p.Unreachable > 0 {
 		lost = append(lost, plural(p.Unreachable, "commit", "commits"))
 	}
-	text := name + " has " + strings.Join(lost, " and ")
-	if p.Unreachable > 0 {
-		text += " that no branch contains"
+	text := ""
+	if len(lost) > 0 {
+		text = name + " has " + strings.Join(lost, " and ")
+		if p.Unreachable > 0 {
+			text += " that no branch contains"
+		}
+		text += ". They will be lost. "
 	}
-	return text + ". They will be lost. Ignored files are deleted too. "
+	if p.Submodule {
+		text += name + " has a submodule. Commits in the submodule that are not pushed will be lost. "
+	}
+	return text + "Ignored files are deleted too. "
 }
 
 // label returns the branch of wt, or the first 7 characters of its head if

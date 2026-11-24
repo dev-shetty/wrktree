@@ -518,3 +518,36 @@ func TestRmOuterFromNested(t *testing.T) {
 		t.Errorf("outer exists %v, nested exists %v", exists(outer), exists(nested))
 	}
 }
+
+// A clean worktree with a submodule needs the typed yes, then the delete
+// uses --force.
+func TestRmSubmodule(t *testing.T) {
+	isolate(t)
+	repo := testrepo.New(t)
+	repo.AddSubmodule(t)
+	feat := repo.AddWorktree(t, "feat-sub")
+	repo.InitSubmodules(t, feat)
+
+	_, _, err := runIn(t, repo.Dir, "yes\n", false, "rm", "feat-sub")
+	if err == nil || err.Error() != "worktree has a submodule: use --force" || !exists(feat) {
+		t.Errorf("no terminal: err %v, exists %v", err, exists(feat))
+	}
+	_, stderr, err := runIn(t, repo.Dir, "y\n", true, "rm", "feat-sub")
+	if err != nil || !exists(feat) || !strings.Contains(stderr, "feat-sub has a submodule.") {
+		t.Errorf("plain y: err %v, exists %v, stderr %q", err, exists(feat), stderr)
+	}
+	if _, _, err := runIn(t, repo.Dir, "yes\n", true, "rm", "feat-sub"); err != nil || exists(feat) {
+		t.Errorf("typed yes: err %v, exists %v", err, exists(feat))
+	}
+}
+
+func TestRmSubmoduleForce(t *testing.T) {
+	isolate(t)
+	repo := testrepo.New(t)
+	repo.AddSubmodule(t)
+	feat := repo.AddWorktree(t, "feat-sub")
+	repo.InitSubmodules(t, feat)
+	if _, _, err := runIn(t, repo.Dir, "", false, "rm", "--force", "feat-sub"); err != nil || exists(feat) {
+		t.Errorf("--force: err %v, exists %v", err, exists(feat))
+	}
+}

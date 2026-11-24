@@ -101,7 +101,7 @@ func readOnly(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "status", "rev-list", "log", "rev-parse", "symbolic-ref", "diff", "merge-base":
+	case "status", "rev-list", "log", "rev-parse", "symbolic-ref", "diff", "merge-base", "ls-files":
 		return true
 	case "worktree":
 		return len(args) > 1 && args[1] == "list"

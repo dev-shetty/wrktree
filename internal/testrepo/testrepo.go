@@ -90,3 +90,24 @@ func (r *Repo) Commit(t *testing.T, dir, file string) {
 	r.Git(t, dir, "add", file)
 	r.Git(t, dir, "commit", "-m", "add "+file)
 }
+
+// AddSubmodule adds a new repository as the submodule "lib" of the main
+// worktree and commits it. A worktree that is added later has the submodule
+// entry, and the submodule is not initialized there: see InitSubmodules.
+func (r *Repo) AddSubmodule(t *testing.T) {
+	t.Helper()
+	lib := filepath.Join(filepath.Dir(r.Dir), "lib-src")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.Git(t, lib, "init", "-b", "master")
+	r.Commit(t, lib, "lib.txt")
+	r.Git(t, r.Dir, "-c", "protocol.file.allow=always", "submodule", "add", lib, "lib")
+	r.Git(t, r.Dir, "commit", "-m", "add submodule lib")
+}
+
+// InitSubmodules initializes the submodules of the worktree at dir.
+func (r *Repo) InitSubmodules(t *testing.T, dir string) {
+	t.Helper()
+	r.Git(t, dir, "-c", "protocol.file.allow=always", "submodule", "update", "--init")
+}

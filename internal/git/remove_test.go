@@ -321,3 +321,76 @@ func TestPlanDeleteSiblingPrefix(t *testing.T) {
 		t.Errorf("plan = %+v, err = %v", p, err)
 	}
 }
+
+// Git refuses to remove a worktree with an initialized submodule without
+// --force, also if the worktree is clean. The plan asks for the typed yes.
+func TestPlanDeleteSubmodule(t *testing.T) {
+	ctx := context.Background()
+	repo := testrepo.New(t)
+	repo.AddSubmodule(t)
+	path := repo.AddWorktree(t, "feat-sub")
+	repo.InitSubmodules(t, path)
+	r := open(t, repo.Dir)
+	p, err := r.PlanDelete(ctx, find(t, r, "feat-sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Blocked != "" || !p.Submodule || !p.NeedsYes || p.Changed != 0 {
+		t.Errorf("plan = %+v, want Submodule and NeedsYes", p)
+	}
+	if err := r.Remove(ctx, path, false); err == nil {
+		t.Fatal("git removed a worktree with a submodule without --force")
+	}
+	if err := r.Remove(ctx, path, true); err != nil || exists(path) {
+		t.Errorf("forced remove: err %v, exists %v", err, exists(path))
+	}
+}
+
+// A submodule that is not initialized does not stop git, so the plan is
+// clean and the delete needs no --force.
+func TestPlanDeleteSubmoduleNotInitialized(t *testing.T) {
+	ctx := context.Background()
+	repo := testrepo.New(t)
+	repo.AddSubmodule(t)
+	path := repo.AddWorktree(t, "feat-sub")
+	r := open(t, repo.Dir)
+	p, err := r.PlanDelete(ctx, find(t, r, "feat-sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Submodule || p.NeedsYes {
+		t.Errorf("plan = %+v, want a clean plan", p)
+	}
+	if err := r.Remove(ctx, path, false); err != nil || exists(path) {
+		t.Errorf("remove: err %v, exists %v", err, exists(path))
+	}
+}
+
+func TestPlanDeleteNoSubmodule(t *testing.T) {
+	repo := testrepo.New(t)
+	repo.AddWorktree(t, "feat-a")
+	r := open(t, repo.Dir)
+	p, err := r.PlanDelete(context.Background(), find(t, r, "feat-a"))
+	if err != nil || p.Submodule || p.NeedsYes {
+		t.Errorf("plan = %+v, err %v", p, err)
+	}
+}
+
+func TestDeletePromptSubmodule(t *testing.T) {
+	wt := Worktree{Path: "/r/feat", Branch: "feat"}
+	for _, tc := range []struct {
+		plan DeletePlan
+		want string
+	}{
+		{DeletePlan{Submodule: true, NeedsYes: true},
+			"feat has a submodule. Commits in the submodule that are not pushed will be lost. Ignored files are deleted too. "},
+		{DeletePlan{Changed: 2, Submodule: true, NeedsYes: true},
+			"feat has 2 changed files. They will be lost. feat has a submodule. Commits in the submodule that are not pushed will be lost. Ignored files are deleted too. "},
+		{DeletePlan{Changed: 1, NeedsYes: true},
+			"feat has 1 changed file. They will be lost. Ignored files are deleted too. "},
+	} {
+		if got := DeletePrompt(wt, tc.plan); got != tc.want {
+			t.Errorf("DeletePrompt(%+v) =\n%q, want\n%q", tc.plan, got, tc.want)
+		}
+	}
+}

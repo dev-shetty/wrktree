@@ -61,6 +61,9 @@ func runRm(c *cobra.Command, env Env, name string, f rmFlags) error {
 		var ok bool
 		if plan.NeedsYes {
 			if !env.IsTerminal() {
+				if plan.Changed == 0 && plan.Unreachable == 0 {
+					return errors.New("worktree has a submodule: use --force")
+				}
 				return errors.New("worktree has changes: use --force")
 			}
 			ok, err = confirm(env, git.DeletePrompt(wt, plan)+"Type yes to delete: ", func(a string) bool { return a == "yes" })
