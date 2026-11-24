@@ -3,7 +3,6 @@ package ui
 
 import (
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,11 +38,10 @@ const (
 	modeList mode = iota
 	modeFilter
 	modeTyped // delete prompt of a worktree with changes: yes + enter deletes
-	modePrune // prune prompt: y prunes
 )
 
 const (
-	missingNote   = "folder is missing: use prune"
+	missingNote   = "folder is missing: press d to remove the record"
 	currentNote   = "cannot delete the current worktree: run through the wt function"
 	cancelledNote = "cancelled"
 )
@@ -80,11 +78,11 @@ type Model struct {
 	spinning bool   // a tick command runs
 	after    Result // the result after the delete of the current worktree; quit when no delete runs
 
-	del        deleteState // the delete that the typed prompt asks about
-	typed      string      // text of the typed delete prompt
-	pruneLines []string    // stale entries that the prune prompt shows
-	busy       string      // text of the prune step that runs; "" = none
-	writing    bool        // the step that runs changes the repository
+	del   deleteState // the delete that the typed prompt asks about
+	typed string      // text of the typed delete prompt
+	// stale holds the paths of the [missing] rows before a stale record
+	// removal, until the reload after it. nil = no removal waits for a reload.
+	stale []string
 }
 
 // New returns a screen that loads its rows when it starts.
@@ -123,8 +121,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.filterKey(msg)
 		case modeTyped:
 			return m.typedKey(msg)
-		case modePrune:
-			return m.pruneKey(msg)
 		}
 		return m.listKey(msg)
 	case planMsg:
@@ -135,16 +131,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.synced(msg)
 	case tickMsg:
 		return m.spun()
-	case pruneListMsg:
-		return m.pruneListed(msg)
-	case prunedMsg:
-		m.busy, m.writing = "", false
-		if msg.err != nil {
-			m.note = "prune failed: " + msg.err.Error()
-			return m, nil
-		}
-		m.note = fmt.Sprintf("pruned %d entries", msg.n)
-		return m, loadCmd(m.d.Git, m.d.Cfg.Base)
+	case staleMsg:
+		return m.staleRemoved(msg)
 	case worktreesMsg:
 		return m.setWorktrees(msg)
 	case changedMsg:
@@ -204,8 +192,13 @@ func (m *Model) row(path string) *status.Row {
 func (m Model) setWorktrees(msg worktreesMsg) (tea.Model, tea.Cmd) {
 	m.loaded = true
 	m.loadErr = msg.err
+	stale := m.stale
+	m.stale = nil
 	if msg.err != nil {
 		return m, nil
+	}
+	if stale != nil {
+		m.note = staleNote(stale, msg.wts)
 	}
 	m.base = msg.base
 	old := make(map[string]status.Row, len(m.rows))
@@ -344,9 +337,6 @@ func (m Model) sizeDone(msg sizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.busy != "" {
-		return m.busyKey(msg)
-	}
 	switch k := msg.String(); k {
 	case "up", "left", "k":
 		m.move(-1)
@@ -382,17 +372,6 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startDelete(true)
 	case "s":
 		return m.startSync()
-	case "p":
-		if m.syncs() > 0 {
-			m.note = syncInProgressNote
-			return m, nil
-		}
-		if len(m.jobs) > 0 {
-			m.note = inProgressNote
-			return m, nil
-		}
-		m.busy = "reading stale entries"
-		return m, pruneListCmd(m.d.Git)
 	case "/":
 		m.mode = modeFilter
 	case "q", "esc":
@@ -499,21 +478,6 @@ func (m *Model) move(delta int) {
 	m.cursor = vis[i].WT.Path
 }
 
-// busyKey handles a key while a prune step runs. No key can change the mode
-// or move the cursor. ctrl+c quits. q and esc quit only while the step
-// reads, not while it prunes.
-func (m Model) busyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
-		return m.quitNow()
-	case "q", "esc":
-		if !m.writing {
-			return m, tea.Quit
-		}
-	}
-	return m, nil
-}
-
 // cursorPath returns the path of the cursor row, or "" if no row shows.
 func (m Model) cursorPath() string {
 	if i := m.cursorIndex(); i >= 0 {
@@ -530,37 +494,4 @@ func (m Model) mainPath() string {
 		}
 	}
 	return ""
-}
-
-func (m Model) pruneListed(msg pruneListMsg) (tea.Model, tea.Cmd) {
-	m.busy = ""
-	switch {
-	case msg.err != nil:
-		m.note = "prune failed: " + msg.err.Error()
-	case len(msg.lines) == 0:
-		m.note = "nothing to prune"
-	case m.mode != modeList:
-		m.note = cancelledNote
-	default:
-		m.pruneLines = msg.lines
-		m.mode = modePrune
-	}
-	return m, nil
-}
-
-// pruneKey handles the prune prompt: only y prunes. Every other key cancels.
-func (m Model) pruneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "y":
-		n := len(m.pruneLines)
-		m.mode, m.pruneLines = modeList, nil
-		if m.busy != "" {
-			return m, nil
-		}
-		m.busy, m.writing = "pruning", true
-		return m, pruneCmd(m.d.Git, n)
-	case "ctrl+c":
-		return m.quitNow()
-	}
-	return m.cancel()
 }

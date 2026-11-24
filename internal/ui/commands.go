@@ -125,16 +125,6 @@ type removedMsg struct {
 	err, branchErr error
 }
 
-type pruneListMsg struct {
-	lines []string
-	err   error
-}
-
-type prunedMsg struct {
-	n   int
-	err error
-}
-
 func planCmd(r git.Runner, wt git.Worktree) tea.Cmd {
 	return func() tea.Msg {
 		p, err := r.PlanDelete(context.Background(), wt)
@@ -158,18 +148,17 @@ func removeCmd(r git.Runner, wt git.Worktree, force, branch bool) tea.Cmd {
 	}
 }
 
-func pruneListCmd(r git.Runner) tea.Cmd {
-	return func() tea.Msg {
-		lines, err := r.PruneDryRun(context.Background())
-		return pruneListMsg{lines: lines, err: err}
-	}
+// staleMsg is the result of a stale record removal. path is the row of
+// the d key.
+type staleMsg struct {
+	path string
+	err  error
 }
 
-// pruneCmd prunes the stale entries. n is the count that the prompt showed.
-func pruneCmd(r git.Runner, n int) tea.Cmd {
-	return func() tea.Msg {
-		return prunedMsg{n: n, err: r.Prune(context.Background())}
-	}
+// staleCmd runs "git worktree prune -v". It removes every stale record, and
+// never a folder or a branch.
+func staleCmd(r git.Runner, path string) tea.Cmd {
+	return func() tea.Msg { return staleMsg{path: path, err: r.Prune(context.Background())} }
 }
 
 type copiedMsg struct {

@@ -19,7 +19,7 @@ const (
 	currentMark  = "●"
 	pending      = "…"
 	fetchFailed  = "fetch failed: distances can be stale"
-	keyFooter    = " enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit"
+	keyFooter    = " enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit"
 	keySep       = " · "
 	filterFooter = " enter keep filter · esc clear filter"
 	typedLabel   = "Type yes to delete: "
@@ -123,9 +123,6 @@ func (m Model) statusLine() string {
 	case m.filter != "":
 		parts = append(parts, "/"+m.filter)
 	}
-	if m.busy != "" {
-		parts = append(parts, m.busy+pending)
-	}
 	if m.note != "" {
 		parts = append(parts, m.note)
 	}
@@ -202,12 +199,6 @@ func (m Model) footer(w int) []string {
 		return []string{filterFooter}
 	case modeTyped:
 		return m.deletePrompt(w)
-	case modePrune:
-		var lines []string
-		for _, l := range m.pruneLines {
-			lines = append(lines, wrap(l, w)...)
-		}
-		return append(lines, wrap(fmt.Sprintf("Prune %d entries? y/N", len(m.pruneLines)), w)...)
 	}
 	return wrapKeys(keyFooter, w)
 }

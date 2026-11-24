@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,14 +14,15 @@ import (
 
 // A delete runs in the background. Each row that d or D started has a job:
 // first the plan is read (checking), then git deletes the worktree
-// (deleting). The screen stays live, and several deletes can run at the
-// same time.
+// (deleting). On a [missing] row, d or D reads no plan: git worktree prune
+// removes the stale record (deleting). The screen stays live, and several
+// deletes can run at the same time.
 
 type jobState int
 
 const (
 	jobChecking jobState = iota + 1 // the delete plan is read, or the typed prompt asks
-	jobDeleting                     // git worktree remove runs
+	jobDeleting                     // git worktree remove runs, or git worktree prune for a [missing] row
 	jobSyncing                      // git.Runner.Sync runs
 )
 
@@ -82,7 +84,7 @@ func (m *Model) dropJob(path string) {
 	m.jobs = jobs
 }
 
-// deletes returns the number of git worktree remove commands that run.
+// deletes returns the number of delete commands that run.
 func (m Model) deletes() int {
 	n := 0
 	for _, j := range m.jobs {
@@ -180,16 +182,20 @@ func (m Model) quitNow() (tea.Model, tea.Cmd) {
 }
 
 // startDelete gives the cursor row a job and reads its delete plan. If
-// branch is true (the D key), the delete also deletes the branch.
+// branch is true (the D key), the delete also deletes the branch. On a
+// [missing] row, it removes the stale record instead.
 func (m Model) startDelete(branch bool) (tea.Model, tea.Cmd) {
 	i := m.cursorIndex()
-	if m.busy != "" || i < 0 {
+	if i < 0 {
 		return m, nil
 	}
 	w := m.visible()[i].WT
 	if j, ok := m.jobs[w.Path]; ok {
 		m.note = jobNote(j)
 		return m, nil
+	}
+	if w.Prunable {
+		return m.startStale(w)
 	}
 	m.setJob(w.Path, job{state: jobChecking, branch: branch})
 	return m, tea.Batch(planCmd(m.d.Git, w), m.startSpin())
@@ -283,13 +289,10 @@ func (m Model) typedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// cancel closes the typed prompt or the prune prompt. The row of the typed
-// prompt loses its job.
+// cancel closes the typed prompt. The row of the prompt loses its job.
 func (m Model) cancel() (tea.Model, tea.Cmd) {
-	if m.mode == modeTyped {
-		m.dropJob(m.del.wt.Path)
-	}
-	m.mode, m.typed, m.pruneLines = modeList, "", nil
+	m.dropJob(m.del.wt.Path)
+	m.mode, m.typed = modeList, ""
 	m.del = deleteState{}
 	m.note = cancelledNote
 	return m, nil
@@ -369,6 +372,59 @@ func (m Model) finish() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// startStale gives the [missing] row of w a deleting job and removes the
+// stale records. No plan and no prompt: git worktree prune deletes no folder
+// and no branch. D does the same as d. The command runs in the main
+// worktree, or in the repository directory if no row is main.
+func (m Model) startStale(w git.Worktree) (tea.Model, tea.Cmd) {
+	m.setJob(w.Path, job{state: jobDeleting, wt: w})
+	r := m.d.Git
+	if main := m.mainPath(); main != "" {
+		r = r.In(main)
+	}
+	return m, tea.Batch(staleCmd(r, w.Path), m.startSpin())
+}
+
+// staleRemoved ends the job of a stale record removal. After an error, the
+// row stays. Else the list loads again, and the reload counts the [missing]
+// rows that went. If a reload removed the row first, the record is gone and
+// nothing more happens.
+func (m Model) staleRemoved(msg staleMsg) (tea.Model, tea.Cmd) {
+	_, ok := m.jobs[msg.path]
+	m.dropJob(msg.path)
+	if msg.err != nil {
+		m.note = "cannot remove the stale record: " + msg.err.Error()
+		return m.finish()
+	}
+	if !ok {
+		return m.finish()
+	}
+	m.stale = []string{}
+	for _, r := range m.rows {
+		if r.WT.Prunable {
+			m.stale = append(m.stale, r.WT.Path)
+		}
+	}
+	if next, quit := m.finish(); quit != nil {
+		return next, quit
+	}
+	return m, loadCmd(m.d.Git, m.d.Cfg.Base)
+}
+
+// staleNote counts the paths of stale that are not [missing] rows of wts.
+func staleNote(stale []string, wts []git.Worktree) string {
+	n := 0
+	for _, p := range stale {
+		if !slices.ContainsFunc(wts, func(w git.Worktree) bool { return w.Path == p && w.Prunable }) {
+			n++
+		}
+	}
+	if n == 1 {
+		return "removed 1 stale record"
+	}
+	return fmt.Sprintf("removed %d stale records", n)
 }
 
 // wtLabel returns the branch of w, or the first 7 characters of its head if

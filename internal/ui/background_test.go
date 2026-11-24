@@ -70,9 +70,6 @@ func TestDeleteInBackground(t *testing.T) {
 	if j, ok := m.jobs[featA]; !ok || j.state != jobChecking {
 		t.Fatalf("job after d = %+v, %v; want checking", j, ok)
 	}
-	if m.busy != "" || m.writing {
-		t.Errorf("d sets the global lock: busy %q", m.busy)
-	}
 	if l := lineWith(t, m.View(), "feat-a"); !strings.Contains(l, " checking") {
 		t.Errorf("row while the plan runs: %q", l)
 	}

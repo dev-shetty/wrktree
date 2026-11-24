@@ -111,7 +111,7 @@ If the current directory is not in a git repository, each command prints
    eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit
+ enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory. `›` marks the cursor.
@@ -140,9 +140,8 @@ Keys:
 | `o` | Quit, then run the open command on the worktree. |
 | `c` | Copy the branch name to the system clipboard. A detached worktree gives the 7-character head. |
 | `s` | Merge the base branch into the branch of the worktree, in the background. |
-| `d` | Delete the worktree. The branch stays. A clean worktree has no prompt. |
+| `d` | Delete the worktree. The branch stays. A clean worktree has no prompt. On a `[missing]` row, remove the stale record. |
 | `D` | Delete the worktree, then its branch with `git branch -d`. |
-| `p` | Show stale entries, then prune after confirmation. |
 | `f` | Run `git fetch origin`, then calculate the distances again. |
 | `/` | Filter the rows by text. |
 | `r` | Read all values again. |
@@ -156,8 +155,7 @@ fit the terminal width. The table shows fewer rows for each extra line.
 `xclip -selection clipboard`, or `xsel --clipboard --input`. The text goes to
 stdin with no trailing newline. The copy runs outside the event loop. The
 footer shows `copied <text>`, or `cannot copy: <error>`. If no tool exists,
-the error is `no clipboard tool found (pbcopy, wl-copy, xclip, xsel)`. `c` does
-nothing while a prune step runs.
+the error is `no clipboard tool found (pbcopy, wl-copy, xclip, xsel)`.
 
 ### Bare repositories
 
@@ -349,8 +347,7 @@ configuration file.
   job text stays, as the marks do.
 - While rows have jobs, the list keeps all keys: moves, `/`, `c`, `f`, `r`, and
   `d` or `D` on other rows. On a row with a job, `enter`, `o`, `d`, and `D` do
-  nothing and the footer shows `delete in progress`. `p` does nothing while a
-  row has a job. A prune that runs still blocks the other keys.
+  nothing and the footer shows `delete in progress`.
 - The plan is for the row of the `d` key, wherever the cursor is now. A clean
   plan starts the delete at once. A plan that needs `yes` moves the cursor to
   its row and opens the typed prompt, but only in the list. If the filter
@@ -410,8 +407,7 @@ configuration file.
   spinner and row style as `deleting`. The screen stays live. A row has one
   job at a time: on a row with a job, `s`, `d`, `D`, `enter`, and `o` set the
   note `<job word> in progress` (`sync in progress` or `delete in progress`)
-  and do nothing. While a prune step runs, `s` does nothing. While a sync
-  runs, `p` sets the note `sync in progress`.
+  and do nothing.
 - When the sync is done, the job ends. The note is `synced <label> with
   <base>`, `<label> is already up to date with <base>`, `sync failed:
   conflict in <files>`, the refusal text, or `sync failed: <error>`. If the
@@ -432,11 +428,33 @@ configuration file.
   conflict gives `sync failed: conflict in <files>` and exit code 1. The list
   shows 3 files, then ` and N more`. A refusal gives its text and exit code 1.
 
-### Prune
+### Stale records
 
-The tool runs `git worktree prune --dry-run -v` and shows the entries. If
-there are no entries, it says so. After confirmation, it runs `git worktree
-prune -v`.
+- The user decided on 2026-11-24 to remove the `p` key from the screen: `d`
+  on a `[missing]` row removes the stale record.
+- A stale record is a git record of a worktree whose folder is gone, for
+  example because the folder was removed without git. The row of a stale
+  record shows `[missing]`. In the screen, `d` on a `[missing]` row runs
+  `git worktree prune -v`, which removes all stale records and never a folder
+  or a branch. `wrktree prune` does the same from the command line.
+- `d` and `D` on a `[missing]` row read no plan and open no prompt. `D` does
+  the same as `d`: a stale record says nothing safe about the branch, so the
+  branch stays. A `[missing]` row never reaches `git worktree remove`.
+- The row gets a `deleting` job with the spinner. The command runs in the
+  main worktree, or in the repository directory if there is no main
+  worktree. The rules for a `deleting` job apply: the keys stay live, the
+  quit keys wait, and `ctrl+c` quits.
+- When the command is done, the job ends and the list loads again. The note
+  is `removed 1 stale record` or `removed N stale records`. N is the number of
+  `[missing]` rows that the list had before and does not have after the
+  reload. On an error, the row stays and the note is `cannot remove the stale
+  record: <error>`.
+- On a `[missing]` row, `enter`, `o`, and `s` set the note `folder is missing:
+  press d to remove the record` and do nothing. The subcommands keep the text
+  `folder is missing: use prune`.
+- `wrktree prune` runs `git worktree prune --dry-run -v` and shows the stale
+  records. If there are none, it says so. After confirmation, it runs `git
+  worktree prune -v`.
 
 ### Configuration
 

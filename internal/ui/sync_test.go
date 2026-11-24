@@ -57,9 +57,6 @@ func TestSyncKeyStartsJob(t *testing.T) {
 	if !hasTick(cmd) {
 		t.Error("s starts no spinner tick")
 	}
-	if m.busy != "" || m.writing {
-		t.Errorf("s sets the global lock: busy %q", m.busy)
-	}
 	m, _ = keys(t, m, "k")
 	if m.cursor == flowsPath {
 		t.Error("k does not move the cursor while a sync runs")
@@ -107,27 +104,6 @@ func TestSyncOneJobPerRow(t *testing.T) {
 	m, cmd := keys(t, m, "s")
 	if cmd == nil || m.jobs[alertPath].state != jobSyncing || m.jobs[flowsPath].state != jobSyncing {
 		t.Errorf("s on a second row: jobs %+v", m.jobs)
-	}
-}
-
-// TestSyncWhilePruneRuns: s does nothing while a prune step runs. p does
-// nothing while a sync runs.
-func TestSyncWhilePruneRuns(t *testing.T) {
-	m := loaded(t)
-	m, _ = keys(t, m, "p")
-	if m2, cmd := keys(t, m, "s"); cmd != nil || len(m2.jobs) != 0 {
-		t.Error("s while a prune list runs starts a sync")
-	}
-	m, _ = send(t, m, pruneListMsg{lines: []string{"Removing worktrees/x"}})
-	m, _ = keys(t, m, "y")
-	if m2, cmd := keys(t, m, "s"); cmd != nil || len(m2.jobs) != 0 {
-		t.Error("s while a prune runs starts a sync")
-	}
-
-	m = syncing(t, flowsPath)
-	m, cmd := keys(t, m, "p")
-	if cmd != nil || m.note != "sync in progress" || m.busy != "" {
-		t.Errorf("p while a sync runs: cmd %v, note %q, busy %q", cmd != nil, m.note, m.busy)
 	}
 }
 
@@ -250,7 +226,7 @@ func TestSyncRowWidth(t *testing.T) {
 }
 
 func TestKeyFooterText(t *testing.T) {
-	const want = " enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit"
+	const want = " enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit"
 	m := loaded(t)
 	m, _ = send(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
 	if !strings.Contains(m.View(), "\n"+want) {

@@ -184,7 +184,7 @@ func TestViewShowsRows(t *testing.T) {
 	v := loaded(t).View()
 	for _, s := range []string{"master", "eng-6201-onboarding-v2-alerts", "eng-6458-bugsink-key-flows",
 		"origin/master", "4 files", "↑2 ↓31", "3 worktrees", "wrktree · mono", "1.4 GB", "3 weeks ago",
-		" enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit"} {
+		" enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit"} {
 		if !strings.Contains(v, s) {
 			t.Errorf("view lacks %q:\n%s", s, v)
 		}
@@ -539,13 +539,13 @@ func TestPrunableRow(t *testing.T) {
 	if sizePlanned(m, alertPath) {
 		t.Error("size command for a missing folder")
 	}
-	for _, k := range []string{"enter", "o"} {
+	for _, k := range []string{"enter", "o", "s"} {
 		m2, _ := keys(t, m, "j")
 		m2, cmd := keys(t, m2, k)
-		if isQuit(cmd) || m2.Result() != (Result{}) {
-			t.Errorf("%s on a prunable row quits", k)
+		if cmd != nil || m2.Result() != (Result{}) || len(m2.jobs) != 0 {
+			t.Errorf("%s on a prunable row: cmd %v, jobs %v", k, cmd != nil, m2.jobs)
 		}
-		if v := m2.View(); !strings.Contains(v, "folder is missing: use prune") {
+		if v := m2.View(); !strings.Contains(v, "folder is missing: press d to remove the record") {
 			t.Errorf("%s: no footer text:\n%s", k, v)
 		}
 	}
@@ -937,16 +937,6 @@ func TestCopyError(t *testing.T) {
 	}
 }
 
-// c does nothing while a delete or prune step runs.
-func TestCopyWaitsForBusy(t *testing.T) {
-	var got []string
-	m := listed(t, copyDeps(t, &got, nil), "origin/master")
-	m.busy = "pruning"
-	if _, cmd := keys(t, m, "c"); cmd != nil {
-		t.Error("c starts a command while a step runs")
-	}
-}
-
 // TestFooterWraps: a footer that does not fit wraps at the separators, and
 // the table gives up rows for the extra lines.
 func TestFooterWraps(t *testing.T) {
@@ -970,7 +960,7 @@ func TestFooterWraps(t *testing.T) {
 	if len(foot) < 2 || strings.Contains(all, "…") {
 		t.Errorf("footer does not wrap: %q", foot)
 	}
-	for _, k := range []string{"enter switch", "o open", "c copy", "s sync", "d delete", "D delete + branch", "p prune", "f fetch", "/ filter", "q quit"} {
+	for _, k := range []string{"enter switch", "o open", "c copy", "s sync", "d delete", "D delete + branch", "f fetch", "/ filter", "q quit"} {
 		if !strings.Contains(all, k) {
 			t.Errorf("footer lacks %q: %q", k, foot)
 		}

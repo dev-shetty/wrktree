@@ -37,12 +37,16 @@ func syncCmd(r git.Runner, wt git.Worktree, base string) tea.Cmd {
 // startSync gives the cursor row a sync job and starts the sync.
 func (m Model) startSync() (tea.Model, tea.Cmd) {
 	i := m.cursorIndex()
-	if m.busy != "" || i < 0 {
+	if i < 0 {
 		return m, nil
 	}
 	w := m.visible()[i].WT
 	if j, ok := m.jobs[w.Path]; ok {
 		m.note = jobNote(j)
+		return m, nil
+	}
+	if w.Prunable {
+		m.note = missingNote
 		return m, nil
 	}
 	m.setJob(w.Path, job{state: jobSyncing, wt: w})

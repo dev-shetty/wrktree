@@ -596,68 +596,177 @@ func TestDeletePromptWidth(t *testing.T) {
 	}
 }
 
-func TestPruneNothing(t *testing.T) {
-	m := loaded(t)
-	m, cmd := keys(t, m, "p")
+// removeStale presses k on the [missing] row at path. No plan runs and no
+// prompt opens: the row shows deleting at once. Then it runs the command,
+// sends its result, runs the reload, and sends the reload.
+func removeStale(t *testing.T, m Model, path, branch, k string) Model {
+	t.Helper()
+	m.cursor = path
+	m, cmd := keys(t, m, k)
 	if cmd == nil {
-		t.Fatal("p starts no command")
+		t.Fatalf("%s on a [missing] row starts no command", k)
 	}
-	m, _ = send(t, m, pruneListMsg{})
-	if v := m.View(); !strings.Contains(v, "nothing to prune") || strings.Contains(v, "Prune ") {
-		t.Errorf("view:\n%s", v)
+	if inPrompt(m) || m.mode != modeList {
+		t.Fatalf("%s on a [missing] row opens a prompt:\n%s", k, m.View())
 	}
-	m, _ = keys(t, m, "p")
-	m, _ = send(t, m, pruneListMsg{err: errors.New("prune list failed")})
-	if v := m.View(); !strings.Contains(v, "prune list failed") {
-		t.Errorf("no error text:\n%s", v)
+	if j, ok := m.jobs[path]; !ok || j.state != jobDeleting {
+		t.Fatalf("job after %s = %+v, %v; want deleting", k, j, ok)
+	}
+	if l := lineWith(t, m.View(), branch); !strings.Contains(l, "deleting") {
+		t.Errorf("row after %s: %q", k, l)
+	}
+	var res tea.Msg
+	for _, msg := range msgs(cmd) {
+		if _, ok := msg.(planMsg); ok {
+			t.Fatalf("%s on a [missing] row reads a delete plan", k)
+		}
+		res = msg
+	}
+	if res == nil {
+		t.Fatalf("%s: the command returns no message", k)
+	}
+	m, cmd = send(t, m, res)
+	for _, msg := range msgs(cmd) {
+		if reload, ok := msg.(worktreesMsg); ok {
+			if reload.err != nil {
+				t.Fatal(reload.err)
+			}
+			m, _ = send(t, m, reload)
+			return m
+		}
+	}
+	t.Fatalf("%s: no reload after the stale record is removed", k)
+	return m
+}
+
+// TestDeleteStaleRecord: d and D on a [missing] row remove the stale record
+// with git worktree prune. The branch stays, and a healthy worktree stays.
+func TestDeleteStaleRecord(t *testing.T) {
+	for _, k := range []string{"d", "D"} {
+		repo := testrepo.New(t)
+		feat := realPath(t, repo.AddWorktree(t, "feat-a"))
+		healthy := realPath(t, repo.AddWorktree(t, "feat-b"))
+		if err := os.RemoveAll(feat); err != nil {
+			t.Fatal(err)
+		}
+		m, _ := repoModel(t, repo, repo.Dir, true)
+		if r := m.row(feat); r == nil || !r.WT.Prunable {
+			t.Fatalf("%s: no [missing] row for %s", k, feat)
+		}
+		m = removeStale(t, m, feat, "feat-a", k)
+		if m.row(feat) != nil {
+			t.Errorf("%s: the [missing] row stays:\n%s", k, m.View())
+		}
+		if out := repo.Git(t, repo.Dir, "worktree", "list", "--porcelain"); strings.Contains(out, feat) {
+			t.Errorf("%s: stale record still listed:\n%s", k, out)
+		}
+		if !hasBranch(t, repo, "feat-a") {
+			t.Errorf("%s deletes the branch of a stale record", k)
+		}
+		if m.row(healthy) == nil || !exists(healthy) || !hasBranch(t, repo, "feat-b") {
+			t.Errorf("%s: the healthy worktree is changed", k)
+		}
+		if m.note != "removed 1 stale record" {
+			t.Errorf("%s: note %q", k, m.note)
+		}
+		if len(m.jobs) != 0 {
+			t.Errorf("%s: jobs after the reload: %+v", k, m.jobs)
+		}
 	}
 }
 
-func TestPruneConfirm(t *testing.T) {
+// TestDeleteTwoStaleRecords: git worktree prune removes every stale record,
+// and the note counts the [missing] rows that went.
+func TestDeleteTwoStaleRecords(t *testing.T) {
 	repo := testrepo.New(t)
-	feat := realPath(t, repo.AddWorktree(t, "feat-a"))
-	if err := os.RemoveAll(feat); err != nil {
-		t.Fatal(err)
+	a := realPath(t, repo.AddWorktree(t, "feat-a"))
+	b := realPath(t, repo.AddWorktree(t, "feat-b"))
+	healthy := realPath(t, repo.AddWorktree(t, "feat-c"))
+	for _, p := range []string{a, b} {
+		if err := os.RemoveAll(p); err != nil {
+			t.Fatal(err)
+		}
 	}
 	m, _ := repoModel(t, repo, repo.Dir, true)
+	m = removeStale(t, m, a, "feat-a", "d")
+	if m.row(a) != nil || m.row(b) != nil {
+		t.Errorf("a [missing] row stays:\n%s", m.View())
+	}
+	if m.row(healthy) == nil || !exists(healthy) {
+		t.Error("the healthy worktree is changed")
+	}
+	if m.note != "removed 2 stale records" {
+		t.Errorf("note %q", m.note)
+	}
+	if !hasBranch(t, repo, "feat-a") || !hasBranch(t, repo, "feat-b") {
+		t.Error("a branch of a stale record is deleted")
+	}
+}
 
-	m, cmd := keys(t, m, "p")
-	list, ok := run(t, cmd).(pruneListMsg)
-	if !ok || list.err != nil || len(list.lines) != 1 {
-		t.Fatalf("pruneListMsg = %+v", list)
-	}
-	m, _ = send(t, m, list)
-	v := m.View()
-	if !strings.Contains(v, "Prune 1 entries? y/N") || !strings.Contains(v, list.lines[0]) {
-		t.Fatalf("prune prompt:\n%s", v)
-	}
-	m2, cmd := keys(t, m, "n")
-	if cmd != nil || strings.Contains(m2.View(), "Prune 1 entries") {
-		t.Error("n does not cancel the prune")
-	}
+// missingModel returns loaded(t) with the alert row [missing] and the
+// cursor on it. Its git commands fail: never run the stale command of it.
+func missingModel(t *testing.T) Model {
+	t.Helper()
+	m := New(deps(t))
+	wts := threeWorktrees()
+	wts[1].Prunable = true
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = send(t, m, worktreesMsg{wts: wts, base: "origin/master"})
+	m.cursor = alertPath
+	return m
+}
 
-	m, cmd = keys(t, m, "y")
-	if _, c := keys(t, m, "p"); c != nil {
-		t.Error("p while a prune runs starts a command")
+// TestStaleJobRules: while a stale record is removed, the rules of a
+// deleting job apply.
+func TestStaleJobRules(t *testing.T) {
+	m := missingModel(t)
+	m, cmd := keys(t, m, "d")
+	if cmd == nil || m.jobs[alertPath].state != jobDeleting {
+		t.Fatalf("d on a [missing] row: cmd %v, jobs %+v", cmd != nil, m.jobs)
 	}
-	pruned, ok := run(t, cmd).(prunedMsg)
-	if !ok || pruned.err != nil || pruned.n != 1 {
-		t.Fatalf("prunedMsg = %+v", pruned)
+	for _, k := range []string{"enter", "o", "d", "D", "s"} {
+		m2, cmd := keys(t, m, k)
+		if cmd != nil || m2.Result() != (Result{}) || !strings.Contains(m2.note, inProgressNote) {
+			t.Errorf("%s on the row: cmd %v, note %q", k, cmd != nil, m2.note)
+		}
 	}
-	if out := repo.Git(t, repo.Dir, "worktree", "list", "--porcelain"); strings.Contains(out, feat) {
-		t.Errorf("entry still listed:\n%s", out)
+	for _, k := range []string{"q", "esc"} {
+		m2, cmd := keys(t, m, k)
+		if cmd != nil || m2.note != "1 delete in progress: wait, or press ctrl+c" {
+			t.Errorf("%s: cmd %v, note %q", k, cmd != nil, m2.note)
+		}
 	}
-	m, cmd = send(t, m, pruned)
-	if !strings.Contains(m.View(), "pruned 1 entries") {
-		t.Errorf("no pruned text:\n%s", m.View())
+	if m2, _ := keys(t, m, "j"); m2.cursor == alertPath {
+		t.Error("j does not move the cursor")
 	}
-	reload, ok := run(t, cmd).(worktreesMsg)
-	if !ok || reload.err != nil || len(reload.wts) != 1 {
-		t.Fatalf("reload = %+v", reload)
+	if _, cmd := keys(t, m, "ctrl+c"); !isQuit(cmd) {
+		t.Error("ctrl+c does not quit")
 	}
-	m, _ = send(t, m, reload)
-	if len(m.rows) != 1 {
-		t.Errorf("rows after prune: %d", len(m.rows))
+}
+
+// TestStaleRecordError: after an error, the job goes, the row stays, and
+// no reload starts.
+func TestStaleRecordError(t *testing.T) {
+	m := missingModel(t)
+	m, _ = keys(t, m, "D")
+	m, cmd := send(t, m, staleMsg{path: alertPath, err: errors.New("boom")})
+	if cmd != nil || len(m.jobs) != 0 || m.row(alertPath) == nil {
+		t.Errorf("cmd %v, jobs %v, row %v", cmd != nil, m.jobs, m.row(alertPath) != nil)
+	}
+	if m.note != "cannot remove the stale record: boom" {
+		t.Errorf("note %q", m.note)
+	}
+}
+
+// TestNoPruneKey: p does nothing, and the screen does not show prune.
+func TestNoPruneKey(t *testing.T) {
+	m := missingModel(t)
+	m2, cmd := keys(t, m, "p")
+	if cmd != nil || m2.mode != modeList || len(m2.jobs) != 0 || m2.note != "" {
+		t.Errorf("p: cmd %v, mode %v, jobs %v, note %q", cmd != nil, m2.mode, m2.jobs, m2.note)
+	}
+	if v := m2.View(); strings.Contains(strings.ToLower(v), "prune") {
+		t.Errorf("view contains prune:\n%s", v)
 	}
 }
 
@@ -709,11 +818,6 @@ func TestQuitWhilePlanRuns(t *testing.T) {
 			if _, cmd := keys(t, m, k); !isQuit(cmd) {
 				t.Errorf("%s while a %s plan runs does not quit", k, del)
 			}
-		}
-		m := loaded(t)
-		m, _ = keys(t, m, "p")
-		if _, cmd := keys(t, m, k); !isQuit(cmd) {
-			t.Errorf("%s while a prune list runs does not quit", k)
 		}
 	}
 }
@@ -794,32 +898,6 @@ func TestPlanWhileFilterOpen(t *testing.T) {
 	}
 	if _, ok := m2.jobs[flowsPath]; ok {
 		t.Error("the cancelled plan keeps its job")
-	}
-}
-
-func TestPruneKeysWaitForList(t *testing.T) {
-	m := loaded(t)
-	m, _ = keys(t, m, "p")
-	m, cmd := keys(t, m, "/")
-	if cmd != nil || m.mode != modeList {
-		t.Fatalf("/ while a prune list runs: mode %v", m.mode)
-	}
-	m, _ = send(t, m, pruneListMsg{lines: []string{"Removing worktrees/x: gitdir file points to non-existent location"}})
-	if !strings.Contains(m.View(), "Prune 1 entries? y/N") {
-		t.Fatalf("no prune prompt:\n%s", m.View())
-	}
-	if _, cmd := keys(t, m, "x"); cmd != nil {
-		t.Error("x prunes")
-	}
-
-	m = loaded(t)
-	m.mode = modeFilter
-	m, _ = send(t, m, pruneListMsg{lines: []string{"Removing worktrees/x"}})
-	if m.mode != modeFilter || strings.Contains(m.View(), "Prune 1 entries") {
-		t.Fatalf("prune list in filter mode opens a prompt:\n%s", m.View())
-	}
-	if _, cmd := keys(t, m, "y"); cmd != nil {
-		t.Error("filter y prunes")
 	}
 }
 
@@ -917,26 +995,6 @@ func TestKeysLiveWhileDeleteRuns(t *testing.T) {
 	}
 }
 
-// TestPruneWaitsForDelete: p does nothing while a row has a job.
-func TestPruneWaitsForDelete(t *testing.T) {
-	m := deleting(t, flowsPath)
-	m, cmd := keys(t, m, "p")
-	if cmd != nil || m.note != inProgressNote || m.busy != "" {
-		t.Errorf("p while a delete runs: cmd %v, note %q, busy %q", cmd != nil, m.note, m.busy)
-	}
-	m = loaded(t)
-	m, _ = keys(t, m, "d")
-	if _, cmd = keys(t, m, "p"); cmd != nil {
-		t.Error("p while a plan runs starts a command")
-	}
-	// While the prune list runs, d does nothing.
-	m = loaded(t)
-	m, _ = keys(t, m, "p")
-	if m2, cmd := keys(t, m, "d"); cmd != nil || len(m2.jobs) != 0 {
-		t.Error("d while a prune list runs starts a plan")
-	}
-}
-
 // TestReloadKeepsJobs: a reload keeps the job of each row that stays.
 func TestReloadKeepsJobs(t *testing.T) {
 	m := deleting(t, flowsPath)
@@ -1023,24 +1081,6 @@ func TestJobRowWidth(t *testing.T) {
 				t.Errorf("width %d: job row is not dim with a yellow job: %q", w, l)
 			}
 		}
-	}
-}
-
-func TestQuitBlockedWhilePruneRuns(t *testing.T) {
-	m := loaded(t)
-	m, _ = keys(t, m, "p")
-	m, _ = send(t, m, pruneListMsg{lines: []string{"Removing worktrees/x"}})
-	m, cmd := keys(t, m, "y")
-	if cmd == nil {
-		t.Fatal("y starts no prune")
-	}
-	for _, k := range []string{"q", "esc", "r"} {
-		if _, cmd := keys(t, m, k); cmd != nil {
-			t.Errorf("%s while a prune runs returns a command", k)
-		}
-	}
-	if _, cmd := keys(t, m, "ctrl+c"); !isQuit(cmd) {
-		t.Error("ctrl+c while a prune runs does not quit")
 	}
 }
 

@@ -13,7 +13,7 @@
    eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit
+ enter switch · o open · c copy · s sync · d delete · D delete + branch · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory.
@@ -89,9 +89,8 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 | `o` | Quit, then run the open command on the worktree. While a delete or a sync runs, `o` does not quit. |
 | `c` | Copy the branch name to the system clipboard. For a detached worktree, copy the 7-character commit hash. |
 | `s` | Merge the base branch into the branch of the worktree. See [Sync](#sync). The sync runs in the background. |
-| `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. The delete runs in the background. |
+| `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. The delete runs in the background. On a `[missing]` row, remove the stale record. See [Stale records](#stale-records). |
 | `D` | Delete the worktree, then delete its branch with `git branch -d`. |
-| `p` | Show the stale worktree entries, then prune them after a prompt. |
 | `f` | Fetch the base branch again, then calculate the distances again. |
 | `/` | Filter the rows by branch name or folder name. |
 | `r` | Read all values again, and measure all disk sizes again. |
@@ -172,7 +171,7 @@ These rules apply to `d` and `D` in the screen and to `wrktree rm`:
 
 - You cannot delete the main worktree.
 - You cannot delete a locked worktree. The error shows the lock reason.
-- You cannot delete a worktree whose folder is missing. Use prune for it.
+- `wrktree rm` cannot delete a worktree whose folder is missing. Use `wrktree prune` for it. In the screen, `d` removes the stale record. See [Stale records](#stale-records).
 - You cannot delete a worktree that has a different worktree in its folder. `git worktree remove` deletes the inner worktree too, also when an ignore rule hides it. Delete the inner worktree first.
 - A worktree with changed files needs the typed word `yes`. The prompt shows the number of changed files. Then `wrktree` runs `git worktree remove --force`.
 - A detached worktree with commits that no branch, remote ref, or tag contains also needs the typed word `yes`. The prompt shows the number of these commits.
@@ -187,7 +186,6 @@ In the screen:
 - If the worktree needs the typed word `yes`, the cursor goes back to its row and a prompt opens. Type `yes` and press `enter` to delete. Any other text cancels. `esc` cancels. If the filter input or a different prompt is open at that time, the delete is cancelled.
 - Each prompt says that ignored files are deleted too.
 - When the delete is done, the row goes away. If the delete fails, the row stays and the footer shows the git message.
-- `p` waits until no row has a step. The footer shows `delete in progress`.
 
 Quit while a delete runs:
 
@@ -245,16 +243,23 @@ In the screen, press `s` on a row:
 - A row has one job at a time. On a row with a job, `s`, `d`, `D`, `enter`, and `o` do nothing. The footer shows `sync in progress` or `delete in progress`.
 - When the sync is done, the footer shows the result: `synced <branch> with <base>`, `<branch> is already up to date with <base>`, `sync failed: conflict in <files>`, or the refusal text. If the fetch failed, the footer adds `(fetch failed: used the local copy)`.
 - After a sync that changed the branch, the screen reads the values of the row again. It also measures the size again.
-- While a prune step runs, `s` does nothing. While a sync runs, `p` does nothing and the footer shows `sync in progress`.
 - While a sync runs, `q`, `esc`, `enter`, and `o` do not quit. The footer shows `1 sync in progress: wait, or press ctrl+c`. If deletes and syncs run together, the footer shows `N jobs in progress: wait, or press ctrl+c`.
 
 Sync never pushes. It never rebases, resets, or stashes. The merge gets `GIT_MERGE_AUTOEDIT=no` and `GIT_TERMINAL_PROMPT=0`, so git does not open an editor or ask for a password.
 
-## Prune
+## Stale records
 
-Prune removes the git entries of worktrees whose folder is missing. These rows show `[missing]` in the table.
+A stale record is a git record of a worktree whose folder is gone, for example because you removed the folder without git. The row of a stale record shows `[missing]`. In the screen, `d` on a `[missing]` row runs `git worktree prune -v`, which removes all stale records and never a folder or a branch. `wrktree prune` does the same from the command line.
 
-`wrktree` runs `git worktree prune --dry-run -v` and shows the entries. After you confirm, it runs `git worktree prune -v`. In the screen, press `y` to prune. Every other key cancels. `wrktree prune --yes` prunes without a prompt.
+In the screen:
+
+- `D` on a `[missing]` row does the same as `d`. The branch stays. There is no prompt.
+- The row shows `deleting` while the command runs. The rules for a delete in progress apply.
+- When the command is done, the screen reads the list again. The footer shows `removed 1 stale record` or `removed N stale records`.
+- If the command fails, the row stays. The footer shows `cannot remove the stale record: <error>`.
+- On a `[missing]` row, `enter`, `o`, and `s` do nothing. The footer shows `folder is missing: press d to remove the record`.
+
+`wrktree prune` runs `git worktree prune --dry-run -v` and shows the stale records. After you confirm, it runs `git worktree prune -v`. `wrktree prune --yes` removes them without a prompt.
 
 ## Configuration
 
