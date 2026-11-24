@@ -333,9 +333,10 @@ func (m Model) table(w, extra int) []string {
 }
 
 // branchCell draws the name in width columns. The folder note is dim and the
-// merged mark is green. A name that does not fit ends with "…". The cut
-// removes the folder note first, then shortens the branch and keeps the
-// marks: " ✓ merged", "[locked]", and "[missing]". If styled is false,
+// merged mark is green, and the no commits mark is dim. A name that does not
+// fit ends with "…". The cut removes the folder note first, then shortens the
+// branch and keeps the marks: " ✓ merged" or " no commits", "[locked]", and
+// "[missing]". If styled is false,
 // the cell has no styles.
 func branchCell(r status.Row, width int, styled bool) string {
 	plain, note, marks := status.Plain(r), status.FolderNote(r), status.Marks(r)
@@ -366,10 +367,14 @@ func branchCell(r status.Row, width int, styled bool) string {
 	return pad(ellipsize(plain+status.Marks(r), width), width)
 }
 
-// styleMarks draws the merged mark green. The other marks stay plain.
+// styleMarks draws the merged mark green and the no commits mark dim. The
+// other marks stay plain.
 func styleMarks(marks string) string {
 	if rest, ok := strings.CutPrefix(marks, status.MergedMark); ok {
 		return green.Render(status.MergedMark) + rest
+	}
+	if rest, ok := strings.CutPrefix(marks, status.NoCommitsMark); ok {
+		return dim.Render(status.NoCommitsMark) + rest
 	}
 	return marks
 }

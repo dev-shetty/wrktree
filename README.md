@@ -22,7 +22,7 @@
 - `CHANGES` is the number of changed files. Untracked files count.
 - `↑` is the number of commits that the worktree has and the base branch does not have.
 - `↓` is the number of commits that the worktree is behind the base branch.
-- `✓ merged` marks a branch that the base branch already contains. See [Merged branches](#merged-branches).
+- `✓ merged` marks a branch that the base branch already contains. `no commits` marks a branch with no commits of its own. See [Merged branches](#merged-branches).
 - `…` shows a value that is not available yet.
 - The main worktree is always the first row. The other rows sort by the time of the last commit, newest first.
 
@@ -106,24 +106,33 @@ The git commands that only read run with `git --no-optional-locks`. Thus the bac
 
 ## Merged branches
 
-A branch that is squash-merged keeps its own commits. Thus its `↑` count stays above 0 after the merge. The `✓ merged` mark shows that the base branch already contains the changes of the branch.
+A branch that is squash-merged keeps its own commits. Thus its `↑` count stays above 0 after the merge. A mark after the branch name shows the merge state of the branch:
 
-`wrktree` compares `HEAD` of each worktree with the base branch. It finds the merge base with `git merge-base`. A branch is merged if one of these conditions is true:
+| Mark | State |
+|---|---|
+| `✓ merged` | The base branch already contains the work of the branch. The mark is green in the screen. |
+| `no commits` | The branch has no commits of its own. For example, you created it from the base branch and did not commit. The mark is dim in the screen. |
+| (no mark) | The branch has work that the base branch does not contain, or `HEAD` is the tip of the base branch, or the state is not known. |
 
-1. `HEAD` is an ancestor of the base branch. This is the case after a normal merge or a fast-forward merge.
-2. `git diff <merge-base> HEAD` is empty. The branch has no changes of its own.
-3. One commit on the base branch after the merge base has the same `git patch-id --stable` as the full diff of the branch. This is the case after a squash merge.
+`wrktree` compares `HEAD` of each worktree with the base branch. It finds the merge base with `git merge-base`. It decides in this order:
+
+1. If `HEAD` is the tip of the base branch, there is no mark.
+2. If `HEAD` is an ancestor of the base branch, `wrktree` finds the oldest commit on the first-parent line of the base branch that `HEAD` does not contain. If the first parent of that commit is `HEAD`, the branch has no commits of its own. If not, a merge commit brought `HEAD` into the base branch, and the branch is merged.
+3. If `git diff <merge-base> HEAD` is empty, the branch is merged.
+4. If one commit on the base branch after the merge base has the same `git patch-id --stable` as the full diff of the branch, the branch is merged. This is the case after a squash merge.
+5. If not, there is no mark.
 
 More rules:
 
-- A worktree at the same commit as the base branch is not merged. It has nothing to merge.
-- The main worktree never shows the mark.
-- If the base branch has more than 2000 commits after the merge base, `wrktree` does not do the third test. The mark does not show.
-- The mark is green in the screen. When the branch name is cut for the width, the mark stays.
+- After a fast-forward merge, git cannot tell the branch apart from a new branch, so the mark is `no commits`.
+- Untracked and changed files do not change the state. Only commits count.
+- The main worktree never shows a mark.
+- If the base branch has more than 2000 commits after the merge base, `wrktree` does not do step 4. The state is not known, and no mark shows.
+- When the branch name is cut for the width, the mark stays.
 - All of these git commands only read. They do not write objects to the repository.
-- The answer depends on the base branch. Thus `f` and `r` calculate it again.
+- The state depends on the base branch. Thus `f` and `r` calculate it again.
 
-The third test can miss a squash merge. This occurs when the base branch changed the lines around the change before the squash commit.
+Step 4 can miss a squash merge. This occurs when the base branch changed the lines around the change before the squash commit.
 
 ## Subcommands
 
@@ -144,7 +153,7 @@ The third test can miss a squash merge. This occurs when the base branch changed
 
 `wrktree ls` flags:
 
-- `--json` prints the rows as JSON. The `merged` field is `true` or `false`, or `null` if the answer is not known. It is `null` for the main worktree.
+- `--json` prints the rows as JSON. The `merged` field is `true` only for a merged branch. The `no_commits` field is `true` only for a branch with no commits of its own. In the other known states, both fields are `false`. If the state is not known, both fields are `null`. They are `null` for the main worktree.
 - `--fetch` fetches the base branch first. Without it, `ls` does not use the network.
 - `--fresh` measures all disk sizes again.
 

@@ -159,7 +159,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mergedMsg:
 		delete(m.mergedWait, msg.path)
 		if r := m.row(msg.path); r != nil && m.base != "" && !r.WT.IsMain {
-			r.Merged, r.MergedOK = msg.merged, msg.err == nil && msg.ok
+			r.Merge = msg.state
+			if msg.err != nil {
+				r.Merge = git.MergeUnknown
+			}
 		}
 	case commitMsg:
 		delete(m.commitWait, msg.path)
@@ -234,7 +237,7 @@ func (m Model) setWorktrees(msg worktreesMsg) (tea.Model, tea.Cmd) {
 			continue
 		}
 		if m.base == "" {
-			r.DistOK, r.MergedOK = false, false
+			r.DistOK, r.Merge = false, git.MergeUnknown
 		}
 		e, ok := m.d.Cache.Get(m.d.Repo, w.Path)
 		bytes, state, runDu := disk.Decide(e, ok, m.d.Cfg.SizeTTL, now, fresh)

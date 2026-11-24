@@ -192,13 +192,20 @@ func squash(t *testing.T, repo *testrepo.Repo, branch string) {
 	repo.Git(t, repo.Dir, "push", "origin", "master")
 }
 
-func merged(t *testing.T, repo *testrepo.Repo, path string) (bool, bool) {
+func merged(t *testing.T, repo *testrepo.Repo, path string) MergeState {
 	t.Helper()
-	m, ok, err := open(t, repo.Dir).Merged(context.Background(), path, "origin/master")
+	st, err := open(t, repo.Dir).Merged(context.Background(), path, "origin/master")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return m, ok
+	return st
+}
+
+func wantState(t *testing.T, name string, got, want MergeState) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s: state = %d, want %d", name, got, want)
+	}
 }
 
 func TestMergedSquash(t *testing.T) {
@@ -207,9 +214,7 @@ func TestMergedSquash(t *testing.T) {
 	repo.Commit(t, feat, "f1.txt")
 	commitText(t, repo, feat, "README.md", "changed\n")
 	squash(t, repo, "feat")
-	if m, ok := merged(t, repo, feat); !m || !ok {
-		t.Errorf("squash merge: merged = %v, ok = %v; want true, true", m, ok)
-	}
+	wantState(t, "squash merge", merged(t, repo, feat), MergeMerged)
 	if ahead, _, err := open(t, repo.Dir).Distance(context.Background(), feat, "origin/master"); err != nil || ahead == 0 {
 		t.Errorf("ahead = %d, err = %v; want ahead > 0", ahead, err)
 	}
@@ -222,9 +227,7 @@ func TestMergedMergeCommit(t *testing.T) {
 	repo.Commit(t, repo.Dir, "m1.txt")
 	repo.Git(t, repo.Dir, "merge", "--no-ff", "-m", "merge feat", "feat")
 	repo.Git(t, repo.Dir, "push", "origin", "master")
-	if m, ok := merged(t, repo, feat); !m || !ok {
-		t.Errorf("merge commit: merged = %v, ok = %v; want true, true", m, ok)
-	}
+	wantState(t, "merge commit", merged(t, repo, feat), MergeMerged)
 }
 
 func TestMergedUnmerged(t *testing.T) {
@@ -233,9 +236,7 @@ func TestMergedUnmerged(t *testing.T) {
 	repo.Commit(t, feat, "f1.txt")
 	repo.Commit(t, repo.Dir, "m1.txt")
 	repo.Git(t, repo.Dir, "push", "origin", "master")
-	if m, ok := merged(t, repo, feat); m || !ok {
-		t.Errorf("unmerged: merged = %v, ok = %v; want false, true", m, ok)
-	}
+	wantState(t, "unmerged", merged(t, repo, feat), MergeNone)
 }
 
 // A squash merge stays merged when master changes the same lines later.
@@ -246,28 +247,56 @@ func TestMergedSquashChangedLater(t *testing.T) {
 	squash(t, repo, "feat")
 	commitText(t, repo, repo.Dir, "a.txt", "two\n")
 	repo.Git(t, repo.Dir, "push", "origin", "master")
-	if m, ok := merged(t, repo, feat); !m || !ok {
-		t.Errorf("changed later: merged = %v, ok = %v; want true, true", m, ok)
-	}
+	wantState(t, "changed later", merged(t, repo, feat), MergeMerged)
 }
 
 func TestMergedAtBase(t *testing.T) {
 	repo := testrepo.New(t)
 	feat := repo.AddWorktree(t, "feat")
-	if m, ok := merged(t, repo, feat); m || !ok {
-		t.Errorf("at base: merged = %v, ok = %v; want false, true", m, ok)
-	}
+	wantState(t, "at base", merged(t, repo, feat), MergeNone)
 }
 
-// A branch with no commits of its own that is behind the base is merged.
-func TestMergedBehindOnly(t *testing.T) {
+// A new branch from an old master commit has no commits of its own. An
+// untracked file does not change that.
+func TestMergedNoCommits(t *testing.T) {
+	repo := testrepo.New(t)
+	repo.Commit(t, repo.Dir, "m0.txt")
+	old := repo.Git(t, repo.Dir, "rev-parse", "HEAD")
+	repo.Commit(t, repo.Dir, "m1.txt")
+	repo.Commit(t, repo.Dir, "m2.txt")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	feat := filepath.Join(filepath.Dir(repo.Dir), "feat")
+	repo.Git(t, repo.Dir, "worktree", "add", "-b", "feat", feat, old)
+	wantState(t, "new branch", merged(t, repo, feat), MergeNoCommits)
+	if err := os.WriteFile(filepath.Join(feat, "untracked.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantState(t, "new branch with an untracked file", merged(t, repo, feat), MergeNoCommits)
+}
+
+// A merge commit on master that brings in the branch: merged, also with no
+// other master commit before the merge.
+func TestMergedMergeCommitOnly(t *testing.T) {
 	repo := testrepo.New(t)
 	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, feat, "f1.txt")
+	repo.Git(t, repo.Dir, "merge", "--no-ff", "-m", "merge feat", "feat")
 	repo.Commit(t, repo.Dir, "m1.txt")
 	repo.Git(t, repo.Dir, "push", "origin", "master")
-	if m, ok := merged(t, repo, feat); !m || !ok {
-		t.Errorf("behind only: merged = %v, ok = %v; want true, true", m, ok)
-	}
+	wantState(t, "merge commit only", merged(t, repo, feat), MergeMerged)
+}
+
+// A fast-forward merge puts the branch tip on the first-parent line of
+// master. git cannot tell this from a new branch at an old master commit,
+// so the result is MergeNoCommits.
+func TestMergedFastForward(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, feat, "f1.txt")
+	repo.Git(t, repo.Dir, "merge", "--ff-only", "feat")
+	repo.Commit(t, repo.Dir, "m1.txt")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	wantState(t, "fast-forward", merged(t, repo, feat), MergeNoCommits)
 }
 
 // Too many base commits to scan: the answer is not known.
@@ -281,9 +310,7 @@ func TestMergedScanLimit(t *testing.T) {
 	repo.Commit(t, repo.Dir, "m1.txt")
 	repo.Commit(t, repo.Dir, "m2.txt")
 	repo.Git(t, repo.Dir, "push", "origin", "master")
-	if _, ok := merged(t, repo, feat); ok {
-		t.Error("scan limit: ok = true, want false")
-	}
+	wantState(t, "scan limit", merged(t, repo, feat), MergeUnknown)
 }
 
 // Merged writes nothing: the object count stays the same.

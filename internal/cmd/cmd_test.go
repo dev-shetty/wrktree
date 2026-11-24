@@ -141,6 +141,31 @@ func TestLsMerged(t *testing.T) {
 	}
 }
 
+// ls shows "no commits" for a new branch behind master, not the merged mark.
+func TestLsNoCommits(t *testing.T) {
+	repo, _ := twoWorktrees(t)
+	repo.Commit(t, repo.Dir, "m1.txt")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	out, _, err := run(t, repo.Dir, "ls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "feat-a no commits") || strings.Contains(out, "✓ merged") || strings.Contains(out, "master no commits") {
+		t.Errorf("no commits mark:\n%s", out)
+	}
+	out, _, err = run(t, repo.Dir, "ls", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if rows[1]["no_commits"] != true || rows[1]["merged"] != false || rows[0]["no_commits"] != nil {
+		t.Errorf("rows: %v", rows)
+	}
+}
+
 func TestLsFetch(t *testing.T) {
 	repo, _ := twoWorktrees(t)
 	_, stderr, err := run(t, repo.Dir, "ls", "--fetch", "--fresh")

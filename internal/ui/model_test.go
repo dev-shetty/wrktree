@@ -775,9 +775,9 @@ func TestMergedMark(t *testing.T) {
 	if m.mergedWait[mainPath] || !m.mergedWait[alertPath] || !m.mergedWait[flowsPath] {
 		t.Errorf("merged waits: %v", m.mergedWait)
 	}
-	m, _ = send(t, m, mergedMsg{path: alertPath, merged: true, ok: true})
-	m, _ = send(t, m, mergedMsg{path: flowsPath, merged: false, ok: true})
-	m, _ = send(t, m, mergedMsg{path: mainPath, merged: true, ok: true})
+	m, _ = send(t, m, mergedMsg{path: alertPath, state: git.MergeMerged})
+	m, _ = send(t, m, mergedMsg{path: flowsPath, state: git.MergeNone})
+	m, _ = send(t, m, mergedMsg{path: mainPath, state: git.MergeMerged})
 	v := m.View()
 	if l := lineWith(t, v, "eng-6201"); !strings.Contains(l, "eng-6201-onboarding-v2-alerts ✓ merged") {
 		t.Errorf("merged row: %q", l)
@@ -811,7 +811,7 @@ func TestMergedMarkIsGreen(t *testing.T) {
 	renderer.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { renderer.SetColorProfile(old) })
 	m := loaded(t)
-	m, _ = send(t, m, mergedMsg{path: alertPath, merged: true, ok: true})
+	m, _ = send(t, m, mergedMsg{path: alertPath, state: git.MergeMerged})
 	if l := lineWith(t, m.View(), "eng-6201"); !strings.Contains(l, "\x1b[32m ✓ merged") {
 		t.Errorf("merged mark is not green: %q", l)
 	}
@@ -828,7 +828,7 @@ func TestMergedCmd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := mergedCmd(r, feat, "origin/master")().(mergedMsg); c.err != nil || !c.merged || !c.ok || c.path != feat {
+	if c := mergedCmd(r, feat, "origin/master")().(mergedMsg); c.err != nil || c.state != git.MergeMerged || c.path != feat {
 		t.Errorf("merged: %+v", c)
 	}
 }
@@ -845,7 +845,7 @@ func TestCursorRowColor(t *testing.T) {
 	)
 	m := loaded(t)
 	m, _ = send(t, m, fetchMsg{err: errors.New("timeout")}) // dims the distances
-	m, _ = send(t, m, mergedMsg{path: alertPath, merged: true, ok: true})
+	m, _ = send(t, m, mergedMsg{path: alertPath, state: git.MergeMerged})
 	m, _ = keys(t, m, "j", "j") // main, flows, alert: the cursor goes to alert
 	v := m.View()
 	cur := lineWith(t, v, "eng-6201")
@@ -979,5 +979,34 @@ func TestFooterWraps(t *testing.T) {
 	}
 	if n := branchRows(m.View()); n != h-6-(len(foot)-1) {
 		t.Errorf("%d table rows with %d footer lines", n, len(foot))
+	}
+}
+
+// TestNoCommitsMark: "no commits" shows after the message, dim on a row
+// without the cursor, cut names keep it, and the main row never shows it.
+func TestNoCommitsMark(t *testing.T) {
+	old := renderer.ColorProfile()
+	renderer.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { renderer.SetColorProfile(old) })
+	m := loaded(t) // the cursor is on the main row
+	m, _ = send(t, m, mergedMsg{path: flowsPath, state: git.MergeNoCommits})
+	m, _ = send(t, m, mergedMsg{path: mainPath, state: git.MergeNoCommits})
+	v := m.View()
+	if l := lineWith(t, v, "eng-6458"); !strings.Contains(l, "eng-6458-bugsink-key-flows\x1b[2m no commits") {
+		t.Errorf("no commits mark is not dim: %q", l)
+	}
+	if l := lineWith(t, v, "(mono)"); strings.Contains(l, "no commits") {
+		t.Errorf("main row: %q", l)
+	}
+	if l := lineWith(t, v, "eng-6201"); strings.Contains(l, "no commits") {
+		t.Errorf("other row: %q", l)
+	}
+	m, _ = keys(t, m, "j")
+	if l := lineWith(t, m.View(), "eng-6458"); strings.Contains(l, "\x1b[2m") || !strings.Contains(l, "no commits") {
+		t.Errorf("cursor row: %q", l)
+	}
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: 40, Height: 20})
+	if l := lineWith(t, m.View(), "↑0 ↓12"); !strings.Contains(l, "… no commits") {
+		t.Errorf("cut row must keep the mark: %q", l)
 	}
 }

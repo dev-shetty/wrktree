@@ -31,8 +31,7 @@ type Row struct {
 	ChangedOK     bool
 	Ahead, Behind int
 	DistOK        bool
-	Merged        bool // the base contains the changes of the branch
-	MergedOK      bool
+	Merge         git.MergeState // MergeUnknown if not known
 	LastCommit    time.Time
 	CommitOK      bool
 	Size          int64
@@ -85,8 +84,8 @@ func LoadAll(ctx context.Context, r git.Runner, wts []git.Worktree, cache *disk.
 			})
 			if !w.IsMain {
 				start(func() {
-					if m, ok, err := r.Merged(ctx, w.Path, o.Base); err == nil && ok {
-						row.Merged, row.MergedOK = m, true
+					if st, err := r.Merged(ctx, w.Path, o.Base); err == nil {
+						row.Merge = st
 					}
 				})
 			}
@@ -173,8 +172,23 @@ const (
 	Unavailable = "—"
 )
 
-// MergedMark is the mark of a branch that the base already contains.
-const MergedMark = " ✓ merged"
+// The marks of the merge state. MergedMark is for a branch that the base
+// already contains. NoCommitsMark is for a branch with no commits of its own.
+const (
+	MergedMark    = " ✓ merged"
+	NoCommitsMark = " no commits"
+)
+
+// MergeMark is the mark of the merge state of r, or "".
+func MergeMark(r Row) string {
+	switch r.Merge {
+	case git.MergeMerged:
+		return MergedMark
+	case git.MergeNoCommits:
+		return NoCommitsMark
+	}
+	return ""
+}
 
 // Plain is the branch name, or the short hash of a detached HEAD, with no marks.
 func Plain(r Row) string {
@@ -189,13 +203,10 @@ func Plain(r Row) string {
 	return n
 }
 
-// Marks is the text after the name: MergedMark, then " [locked]" and
+// Marks is the text after the name: the MergeMark, then " [locked]" and
 // " [missing]". It is "" for a row with no marks.
 func Marks(r Row) string {
-	var n string
-	if r.MergedOK && r.Merged {
-		n += MergedMark
-	}
+	n := MergeMark(r)
 	if r.WT.Locked {
 		n += " [locked]"
 	}
@@ -316,6 +327,7 @@ type jsonRow struct {
 	Ahead      *int       `json:"ahead"`
 	Behind     *int       `json:"behind"`
 	Merged     *bool      `json:"merged"`
+	NoCommits  *bool      `json:"no_commits"`
 	Base       string     `json:"base"`
 	LastCommit *time.Time `json:"last_commit"`
 	SizeBytes  *int64     `json:"size_bytes"`
@@ -337,9 +349,9 @@ func JSON(w io.Writer, rows []Row, base string) error {
 		if r.DistOK {
 			j.Ahead, j.Behind = &r.Ahead, &r.Behind
 		}
-		if r.MergedOK {
-			m := r.Merged
-			j.Merged = &m
+		if r.Merge != git.MergeUnknown {
+			merged, none := r.Merge == git.MergeMerged, r.Merge == git.MergeNoCommits
+			j.Merged, j.NoCommits = &merged, &none
 		}
 		if r.CommitOK {
 			t := r.LastCommit

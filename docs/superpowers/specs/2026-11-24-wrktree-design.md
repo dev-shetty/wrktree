@@ -125,8 +125,10 @@ If the current directory is not in a git repository, each command prints
   dimmed after the branch name.
 - A branch that the base branch already contains shows a green `✓ merged`
   mark after the branch name and the folder name, before `[locked]` and
-  `[missing]`. When the name is cut for the width, the marks stay. The main
-  worktree never shows the mark.
+  `[missing]`. A branch with no commits of its own shows a dim `no commits`
+  mark at the same position. On the cursor row, the mark has the row color.
+  When the name is cut for the width, the marks stay. The main worktree never
+  shows a mark.
 
 Keys:
 
@@ -172,20 +174,31 @@ worktree. (Builder call.)
 | Merged into base | Read-only git commands in the worktree. See below. |
 
 Merged into base: the tool compares `HEAD` with `<base>`. It does not do this
-for the main worktree, for a missing folder, or when there is no base.
+for the main worktree, for a missing folder, or when there is no base. The
+result is one of four states: unknown, none (no mark), no commits, and merged.
 
-1. If `HEAD` and `<base>` are the same commit, the branch is not merged.
-2. `mb = git merge-base <base> HEAD`. If `mb` is `HEAD`, the branch is merged.
-3. If `git diff <mb> HEAD` is empty, the branch is merged.
+1. If `HEAD` and `<base>` are the same commit, the state is none.
+2. `mb = git merge-base <base> HEAD`. If `mb` is `HEAD`, `HEAD` is an
+   ancestor of `<base>`. Then `c` is the first line of
+   `git rev-list --first-parent --reverse HEAD..<base>`. If `c^1` is `HEAD`,
+   `HEAD` is an old position of the base branch: the state is no commits. If
+   not, a merge commit brought `HEAD` into the base: the state is merged. If
+   the list is empty or `c` has no parent, the state is no commits.
+3. If `git diff <mb> HEAD` is empty, the state is merged.
 4. If `git rev-list --count --no-merges <mb>..<base>` is more than 2000, the
-   answer is not known.
+   state is unknown.
 5. The tool calculates `git patch-id --stable` of the diff of step 3. It also
    calculates the patch ids of `git log -p --no-merges <mb>..<base>`. If the
-   list has the patch id of the diff, the branch is merged (a squash merge).
-   If not, the branch is not merged.
+   list has the patch id of the diff, the state is merged (a squash merge).
+   If not, the state is none.
+
+A fast-forward merge gives the state no commits, because git cannot tell it
+apart from a new branch at an old commit of the base.
 
 These commands only read, and they write no objects. `ls --json` gives the
-answer in the field `merged`: `true`, `false`, or `null` if not known.
+state in two fields. `merged` is `true` only for merged. `no_commits` is
+`true` only for no commits. For the other known states, both are `false`.
+For unknown, both are `null`.
 
 The list of worktrees loads first, and the table shows immediately. The other
 values load in parallel, one goroutine for each worktree and value. A limit of

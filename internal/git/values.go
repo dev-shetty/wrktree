@@ -117,73 +117,121 @@ var mergedScanLimit = 2000
 // diffFlags make the diff text independent of the git configuration.
 var diffFlags = []string{"--no-color", "--no-ext-diff", "--no-textconv"}
 
-// Merged reports if the base branch already contains the changes of the
-// worktree at path. ok is false when the answer is not known.
+// MergeState tells how the work of a branch relates to the base branch.
+type MergeState int
+
+const (
+	// MergeUnknown means that the state is not known: too many base commits
+	// to read, or an error.
+	MergeUnknown MergeState = iota
+	// MergeNone means that the branch has work that the base does not
+	// contain, or that HEAD is the base tip.
+	MergeNone
+	// MergeNoCommits means that the branch has no commits of its own.
+	MergeNoCommits
+	// MergeMerged means that the base contains the work of the branch.
+	MergeMerged
+)
+
+// Merged tells if the base branch already contains the work of the
+// worktree at path.
 //
-// HEAD is merged if it is an ancestor of base, if it adds no change to the
-// merge base, or if a commit on base since the merge base has the same patch
-// id as the whole change of HEAD. The last test finds a squash merge. Merged
-// runs only commands that read, and it writes no objects.
-func (r Runner) Merged(ctx context.Context, path, base string) (merged, ok bool, err error) {
+// If HEAD is an ancestor of base, Merged finds c, the oldest commit on the
+// first-parent line of base that HEAD does not contain. If the first parent
+// of c is HEAD, HEAD is an old position of base: MergeNoCommits. A
+// fast-forward merge gives the same result, because git cannot tell it
+// apart. Otherwise HEAD came into base through a merge commit: MergeMerged.
+//
+// If HEAD is not an ancestor, the branch is merged if it adds no change to
+// the merge base, or if a commit on base since the merge base has the same
+// patch id as the whole change of HEAD. The last test finds a squash merge.
+// Merged runs only commands that read, and it writes no objects.
+func (r Runner) Merged(ctx context.Context, path, base string) (MergeState, error) {
 	g := r.In(path)
 	head, err := g.Run(ctx, "rev-parse", "HEAD")
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	tip, err := g.Run(ctx, "rev-parse", base)
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	if head == tip {
-		return false, true, nil
+		return MergeNone, nil
 	}
 	mb, err := g.Run(ctx, "merge-base", base, "HEAD")
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	if mb == head {
-		return true, true, nil
+		return g.ancestorState(ctx, head, base)
 	}
 	diff, err := g.Run(ctx, append(append([]string{"diff"}, diffFlags...), mb, "HEAD")...)
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	if strings.TrimSpace(diff) == "" {
-		return true, true, nil
+		return MergeMerged, nil
 	}
 	out, err := g.Run(ctx, "rev-list", "--count", "--no-merges", mb+".."+base)
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	if n > mergedScanLimit {
-		return false, false, nil
+		return MergeUnknown, nil
 	}
 	if n == 0 {
-		return false, true, nil
+		return MergeNone, nil
 	}
 	want, err := g.patchIDs(ctx, diff+"\n")
 	if err != nil || len(want) == 0 {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	logArgs := append(append([]string{"log", "-p", "--no-merges", "--format=commit %H"}, diffFlags...), mb+".."+base)
 	log, err := g.Run(ctx, logArgs...)
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	have, err := g.patchIDs(ctx, log+"\n")
 	if err != nil {
-		return false, false, err
+		return MergeUnknown, err
 	}
 	for _, id := range have {
 		if id == want[0] {
-			return true, true, nil
+			return MergeMerged, nil
 		}
 	}
-	return false, true, nil
+	return MergeNone, nil
+}
+
+// ancestorState is the state of a HEAD that is an ancestor of base and is
+// not the base tip.
+func (r Runner) ancestorState(ctx context.Context, head, base string) (MergeState, error) {
+	out, err := r.Run(ctx, "rev-list", "--first-parent", "--reverse", "HEAD.."+base)
+	if err != nil {
+		return MergeUnknown, err
+	}
+	c, _, _ := strings.Cut(out, "\n")
+	if c = strings.TrimSpace(c); c == "" {
+		return MergeNoCommits, nil
+	}
+	parent, err := r.Run(ctx, "rev-parse", "--verify", "--quiet", c+"^1")
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		// c has no parent.
+		return MergeNoCommits, nil
+	}
+	if err != nil {
+		return MergeUnknown, err
+	}
+	if parent == head {
+		return MergeNoCommits, nil
+	}
+	return MergeMerged, nil
 }
 
 // patchIDs returns the stable patch ids of the patches in text. git

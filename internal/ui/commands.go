@@ -36,9 +36,9 @@ type distMsg struct {
 }
 
 type mergedMsg struct {
-	path       string
-	merged, ok bool
-	err        error
+	path  string
+	state git.MergeState
+	err   error
 }
 
 type commitMsg struct {
@@ -87,8 +87,8 @@ func distCmd(r git.Runner, path, base string) tea.Cmd {
 
 func mergedCmd(r git.Runner, path, base string) tea.Cmd {
 	return func() tea.Msg {
-		merged, ok, err := r.Merged(context.Background(), path, base)
-		return mergedMsg{path: path, merged: merged, ok: ok, err: err}
+		st, err := r.Merged(context.Background(), path, base)
+		return mergedMsg{path: path, state: st, err: err}
 	}
 }
 
