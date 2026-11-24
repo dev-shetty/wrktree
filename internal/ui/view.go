@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -97,7 +98,7 @@ func (m Model) title(w int) string {
 	var total int64
 	known, approx := false, false
 	for _, r := range m.rows {
-		if r.SizeState == disk.SizeNone {
+		if r.SizeState == disk.SizeNone || m.sizeInOther(r) {
 			continue
 		}
 		known = true
@@ -138,6 +139,22 @@ func statusLines(s string, w int) []string {
 		lines[maxStatusLines-1] = ellipsize(lines[maxStatusLines-1]+pending, max(w, 1))
 	}
 	return lines
+}
+
+const sep = string(filepath.Separator)
+
+// sizeInOther reports whether the size of a different row already counts
+// the folder of r: r is in the folder of that row, and that row has a size.
+func (m Model) sizeInOther(r status.Row) bool {
+	for _, o := range m.rows {
+		// git gives real paths, so the text of the paths is enough. View
+		// must not read the disk.
+		if o.WT.Path != r.WT.Path && o.SizeState != disk.SizeNone &&
+			strings.HasPrefix(r.WT.Path, strings.TrimSuffix(o.WT.Path, sep)+sep) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) statusLine() string {

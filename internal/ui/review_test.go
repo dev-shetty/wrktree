@@ -8,6 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/dev-shetty/wrktree/internal/disk"
+	"github.com/dev-shetty/wrktree/internal/git"
 	"github.com/dev-shetty/wrktree/internal/testrepo"
 )
 
@@ -55,6 +57,30 @@ func TestLoadErrorWithManyLinesKeepsHeight(t *testing.T) {
 	}
 	if strings.Contains(v, "\t") || !strings.Contains(v, "Aborting") {
 		t.Errorf("the error text has a tab or is cut:\n%s", v)
+	}
+}
+
+// The size of a worktree in the folder of a different worktree is already
+// in the size of that worktree. The total counts it one time.
+func TestTitleTotalNestedWorktree(t *testing.T) {
+	const nested = mainPath + "/.claude/worktrees/x"
+	m := New(deps(t))
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = send(t, m, worktreesMsg{wts: []git.Worktree{
+		{Path: mainPath, Branch: "master", IsMain: true},
+		{Path: nested, Branch: "x"},
+		{Path: mainPath + "-2", Branch: "y"}, // the same prefix, but not in the folder
+	}, base: "origin/master"})
+	m, _ = send(t, m, sizeMsg{path: nested, bytes: 1 << 30})
+	m, _ = send(t, m, sizeMsg{path: mainPath + "-2", bytes: 2 << 30})
+	title := func() string { return strings.Split(m.View(), "\n")[0] }
+	// The outer size is not known: the nested size counts.
+	if want := " · " + disk.Human(3<<30); !strings.HasSuffix(title(), want) {
+		t.Errorf("before the outer size: title %q, want %s", title(), want)
+	}
+	m, _ = send(t, m, sizeMsg{path: mainPath, bytes: 4 << 30})
+	if want := " · " + disk.Human(6<<30); !strings.HasSuffix(title(), want) {
+		t.Errorf("title %q, want total %s", title(), want)
 	}
 }
 
