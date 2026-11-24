@@ -130,7 +130,10 @@ func (e *AmbiguousError) Error() string {
 // Match finds one worktree by name. An exact match of the branch or the folder
 // name wins. Otherwise a case-insensitive substring of either must match once.
 func Match(wts []Worktree, name string) (Worktree, error) {
-	n := strings.ToLower(name)
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return Worktree{}, fmt.Errorf("%w %q", ErrNoMatch, name)
+	}
 	var exact, partial []Worktree
 	for _, w := range wts {
 		b, f := strings.ToLower(w.Branch), strings.ToLower(filepath.Base(w.Path))

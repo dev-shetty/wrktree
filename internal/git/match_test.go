@@ -80,3 +80,13 @@ func TestMatch(t *testing.T) {
 		t.Errorf("message = %q, want %q", err.Error(), want)
 	}
 }
+
+func TestMatchEmptyName(t *testing.T) {
+	wts := []Worktree{{Path: "/w/mono", Branch: "master"}}
+	for _, name := range []string{"", "   "} {
+		_, err := Match(wts, name)
+		if !errors.Is(err, ErrNoMatch) {
+			t.Errorf("Match(%q): err = %v, want ErrNoMatch", name, err)
+		}
+	}
+}
