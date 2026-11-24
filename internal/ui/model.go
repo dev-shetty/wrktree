@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,7 @@ type Deps struct {
 	Cwd   string
 	CanCD bool // WRKTREE_CD_FILE is set
 	Now   func() time.Time
+	Copy  func(text string) error // puts text on the system clipboard
 }
 
 // Result tells the caller what to do after the screen quits. At most one of
@@ -92,6 +94,9 @@ type Model struct {
 func New(d Deps) Model {
 	if d.Now == nil {
 		d.Now = time.Now
+	}
+	if d.Copy == nil {
+		d.Copy = func(string) error { return errors.New("no clipboard") }
 	}
 	return Model{
 		d:           d,
@@ -164,6 +169,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case sizeMsg:
 		return m.sizeDone(msg)
+	case copiedMsg:
+		if msg.err != nil {
+			m.note = "cannot copy: " + msg.err.Error()
+		} else {
+			m.note = "copied " + msg.text
+		}
 	case fetchMsg:
 		m.fetching = false
 		m.fetchFailed = msg.err != nil
@@ -335,6 +346,10 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.choose(false)
 	case "o":
 		return m.choose(true)
+	case "c":
+		if i := m.cursorIndex(); i >= 0 {
+			return m, copyCmd(m.d.Copy, wtLabel(m.visible()[i].WT))
+		}
 	case "f":
 		if m.base != "" && !m.fetching {
 			m.fetching, m.fetchFailed = true, false

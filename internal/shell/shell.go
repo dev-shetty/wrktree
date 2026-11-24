@@ -2,6 +2,7 @@
 package shell
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -78,4 +79,32 @@ func RunOpen(template, path string) error {
 		}
 	}
 	return cmd.Run()
+}
+
+// clipboardTools are the clipboard tools that Copy tries, in order.
+var clipboardTools = [][]string{
+	{"pbcopy"},
+	{"wl-copy"},
+	{"xclip", "-selection", "clipboard"},
+	{"xsel", "--clipboard", "--input"},
+}
+
+// Copy puts text on the system clipboard. It runs the first tool of
+// clipboardTools that is on PATH, with text on stdin and no trailing newline.
+// The tool gets no stdout or stderr pipe: xclip and xsel stay in the
+// background to serve the clipboard, and a pipe would make Copy wait for them.
+func Copy(text string) error {
+	for _, tool := range clipboardTools {
+		path, err := exec.LookPath(tool[0])
+		if err != nil {
+			continue
+		}
+		cmd := exec.Command(path, tool[1:]...)
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s: %w", tool[0], err)
+		}
+		return nil
+	}
+	return errors.New("no clipboard tool found (pbcopy, wl-copy, xclip, xsel)")
 }

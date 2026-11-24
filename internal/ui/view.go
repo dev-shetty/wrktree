@@ -19,7 +19,8 @@ const (
 	currentMark  = "●"
 	pending      = "…"
 	fetchFailed  = "fetch failed: distances can be stale"
-	keyFooter    = " enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit"
+	keyFooter    = " enter switch · o open · c copy · d delete · D delete + branch · p prune · f fetch · / filter · q quit"
+	keySep       = " · "
 	filterFooter = " enter keep filter · esc clear filter"
 	typedLabel   = "Type yes to delete: "
 	typedHint    = "type yes + enter · esc cancel"
@@ -206,7 +207,30 @@ func (m Model) footer(w int) []string {
 		}
 		return append(lines, wrap(fmt.Sprintf("Prune %d entries? y/N", len(m.pruneLines)), w)...)
 	}
-	return []string{keyFooter}
+	return wrapKeys(keyFooter, w)
+}
+
+// wrapKeys breaks the key help into lines of at most w columns. A break
+// comes only at a separator. Each line starts with one space. A key that
+// is wider than w alone gets its own line, and View cuts it.
+func wrapKeys(s string, w int) []string {
+	if lipgloss.Width(s) <= w {
+		return []string{s}
+	}
+	var lines []string
+	line := ""
+	for _, k := range strings.Split(strings.TrimPrefix(s, " "), keySep) {
+		switch {
+		case line == "":
+			line = " " + k
+		case lipgloss.Width(line+keySep+k) <= w:
+			line += keySep + k
+		default:
+			lines = append(lines, line)
+			line = " " + k
+		}
+	}
+	return append(lines, line)
 }
 
 // deletePrompt returns the lines of the typed delete prompt: the text of

@@ -166,6 +166,7 @@ func runScreen(ctx context.Context, env Env) error {
 		Cwd:   env.Dir,
 		CanCD: os.Getenv(shell.CDFileEnv) != "",
 		Now:   env.Now,
+		Copy:  shell.Copy,
 	})
 	if err != nil {
 		return err

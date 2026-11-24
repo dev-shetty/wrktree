@@ -84,7 +84,7 @@ func TestRootScreenSwitch(t *testing.T) {
 	if d.CanCD {
 		t.Error("CanCD is true with no cd file")
 	}
-	if d.Repo != main || d.Name != "main" || d.Cache == nil || d.Git.Dir == "" || d.Now == nil {
+	if d.Repo != main || d.Name != "main" || d.Cache == nil || d.Git.Dir == "" || d.Now == nil || d.Copy == nil {
 		t.Errorf("Deps = %+v", d)
 	}
 	if cwd, _ := filepath.Abs(feat); d.Cwd != cwd {

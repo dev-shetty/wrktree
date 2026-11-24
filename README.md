@@ -13,7 +13,7 @@
    eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit
+ enter switch · o open · c copy · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory.
@@ -87,6 +87,7 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 | `↑` `↓` `←` `→` `j` `k` | Move the cursor. `←` moves up and `→` moves down. From the first row, a move up goes to the last row. |
 | `enter` | Change to the worktree and quit. |
 | `o` | Quit, then run the open command on the worktree. |
+| `c` | Copy the branch name to the system clipboard. For a detached worktree, copy the 7-character commit hash. |
 | `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. |
 | `D` | Delete the worktree, then delete its branch with `git branch -d`. |
 | `p` | Show the stale worktree entries, then prune them after a prompt. |
@@ -94,6 +95,10 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 | `/` | Filter the rows by branch name or folder name. |
 | `r` | Read all values again, and measure all disk sizes again. |
 | `q` `esc` `ctrl+c` | Quit. |
+
+If the key help does not fit the terminal width, it wraps onto more lines at the ` · ` separators. The table then shows fewer rows.
+
+`c` uses the first clipboard tool that it finds on `PATH`: `pbcopy`, `wl-copy`, `xclip`, or `xsel`. The footer shows `copied <name>`. If no tool exists, the footer shows `cannot copy: no clipboard tool found (pbcopy, wl-copy, xclip, xsel)`.
 
 The screen draws on stderr. Stdout carries only the path for a directory change.
 

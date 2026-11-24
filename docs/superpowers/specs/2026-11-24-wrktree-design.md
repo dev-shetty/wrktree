@@ -110,7 +110,7 @@ If the current directory is not in a git repository, each command prints
    eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit
+ enter switch · o open · c copy · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory. `›` marks the cursor.
@@ -135,6 +135,7 @@ Keys:
 | `↑` `↓` `←` `→` `j` `k` | Move the cursor. `←` moves up and `→` moves down. The cursor wraps from the first row to the last row and back. |
 | `enter` | Switch to the worktree and quit. |
 | `o` | Quit, then run the open command on the worktree. |
+| `c` | Copy the branch name to the system clipboard. A detached worktree gives the 7-character head. |
 | `d` | Delete the worktree. The branch stays. A clean worktree has no prompt. |
 | `D` | Delete the worktree, then its branch with `git branch -d`. |
 | `p` | Show stale entries, then prune after confirmation. |
@@ -142,6 +143,16 @@ Keys:
 | `/` | Filter the rows by text. |
 | `r` | Read all values again. |
 | `q` `esc` `ctrl+c` | Quit. |
+
+The key help wraps onto more lines at the ` · ` separators when it does not
+fit the terminal width. The table shows fewer rows for each extra line.
+
+`c` runs the first clipboard tool on `PATH`: `pbcopy`, `wl-copy`,
+`xclip -selection clipboard`, or `xsel --clipboard --input`. The text goes to
+stdin with no trailing newline. The copy runs outside the event loop. The
+footer shows `copied <text>`, or `cannot copy: <error>`. If no tool exists,
+the error is `no clipboard tool found (pbcopy, wl-copy, xclip, xsel)`. `c` does
+nothing while a delete or prune step runs.
 
 ### Bare repositories
 

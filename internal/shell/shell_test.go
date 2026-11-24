@@ -151,3 +151,67 @@ func TestRunOpenDropsCDFile(t *testing.T) {
 		t.Errorf("WRKTREE_CD_FILE in the open command = %q, want unset", got)
 	}
 }
+
+// fakeTool writes a tool into dir that saves its arguments and its stdin.
+func fakeTool(t *testing.T, dir, name, out string) {
+	t.Helper()
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + Quote(out+".args") + "\n/bin/cat > " + Quote(out) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCopy(t *testing.T) {
+	cases := []struct {
+		tools []string
+		used  string
+		args  string
+	}{
+		{[]string{"pbcopy", "wl-copy", "xclip", "xsel"}, "pbcopy", ""},
+		{[]string{"wl-copy", "xclip", "xsel"}, "wl-copy", ""},
+		{[]string{"xclip", "xsel"}, "xclip", "-selection clipboard"},
+		{[]string{"xsel"}, "xsel", "--clipboard --input"},
+	}
+	for _, c := range cases {
+		dir, outDir := t.TempDir(), t.TempDir()
+		for _, tool := range c.tools {
+			fakeTool(t, dir, tool, filepath.Join(outDir, tool))
+		}
+		t.Setenv("PATH", dir)
+		if err := Copy("feat-a"); err != nil {
+			t.Fatalf("%s: %v", c.used, err)
+		}
+		got, err := os.ReadFile(filepath.Join(outDir, c.used))
+		if err != nil || string(got) != "feat-a" {
+			t.Errorf("%s: stdin %q, err %v", c.used, got, err)
+		}
+		args, _ := os.ReadFile(filepath.Join(outDir, c.used+".args"))
+		if strings.TrimSpace(string(args)) != c.args {
+			t.Errorf("%s: args %q, want %q", c.used, args, c.args)
+		}
+		for _, other := range c.tools[1:] {
+			if _, err := os.Stat(filepath.Join(outDir, other)); err == nil {
+				t.Errorf("%s ran after %s", other, c.used)
+			}
+		}
+	}
+}
+
+func TestCopyNoTool(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	err := Copy("x")
+	if err == nil || err.Error() != "no clipboard tool found (pbcopy, wl-copy, xclip, xsel)" {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestCopyToolFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "pbcopy"), []byte("#!/bin/sh\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	if err := Copy("x"); err == nil || !strings.Contains(err.Error(), "pbcopy") {
+		t.Errorf("err = %v, want an error that names pbcopy", err)
+	}
+}

@@ -181,7 +181,7 @@ func TestViewShowsRows(t *testing.T) {
 	v := loaded(t).View()
 	for _, s := range []string{"master", "eng-6201-onboarding-v2-alerts", "eng-6458-bugsink-key-flows",
 		"origin/master", "4 files", "↑2 ↓31", "3 worktrees", "wrktree · mono", "1.4 GB", "3 weeks ago",
-		" enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit"} {
+		" enter switch · o open · c copy · d delete · D delete + branch · p prune · f fetch · / filter · q quit"} {
 		if !strings.Contains(v, s) {
 			t.Errorf("view lacks %q:\n%s", s, v)
 		}
@@ -878,4 +878,106 @@ func TestNarrowTerminalStyled(t *testing.T) {
 	renderer.SetColorProfile(termenv.ANSI)
 	t.Cleanup(func() { renderer.SetColorProfile(old) })
 	TestNarrowTerminal(t)
+}
+
+// copyDeps returns deps with a fake clipboard. got receives the copied text.
+func copyDeps(t *testing.T, got *[]string, err error) Deps {
+	t.Helper()
+	d := deps(t)
+	d.Copy = func(s string) error { *got = append(*got, s); return err }
+	return d
+}
+
+// TestCopyKey: c copies the branch name of the cursor row in a command.
+func TestCopyKey(t *testing.T) {
+	var got []string
+	m := listed(t, copyDeps(t, &got, nil), "origin/master")
+	m, _ = keys(t, m, "j")
+	m, cmd := keys(t, m, "c")
+	if cmd == nil || len(got) != 0 {
+		t.Fatalf("c: cmd %v, copied %v before the command runs", cmd != nil, got)
+	}
+	m, _ = send(t, m, cmd())
+	if len(got) != 1 || got[0] != "eng-6201-onboarding-v2-alerts" {
+		t.Errorf("copied %q", got)
+	}
+	if v := m.View(); !strings.Contains(v, "copied eng-6201-onboarding-v2-alerts") {
+		t.Errorf("no note:\n%s", v)
+	}
+}
+
+func TestCopyDetached(t *testing.T) {
+	var got []string
+	m := New(copyDeps(t, &got, nil))
+	wts := threeWorktrees()
+	wts[1].Branch, wts[1].Detached, wts[1].Head = "", true, "abcdef1234567890"
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = send(t, m, worktreesMsg{wts: wts, base: "origin/master"})
+	m.cursor = alertPath
+	m, cmd := keys(t, m, "c")
+	m, _ = send(t, m, cmd())
+	if len(got) != 1 || got[0] != "abcdef1" {
+		t.Errorf("copied %q", got)
+	}
+	if v := m.View(); !strings.Contains(v, "copied abcdef1") {
+		t.Errorf("no note:\n%s", v)
+	}
+}
+
+func TestCopyError(t *testing.T) {
+	var got []string
+	m := listed(t, copyDeps(t, &got, errors.New("no clipboard tool found (pbcopy, wl-copy, xclip, xsel)")), "origin/master")
+	m, cmd := keys(t, m, "c")
+	m, _ = send(t, m, cmd())
+	if v := m.View(); !strings.Contains(v, "cannot copy: no clipboard tool found (pbcopy, wl-copy, xclip, xsel)") {
+		t.Errorf("no error note:\n%s", v)
+	}
+}
+
+// c does nothing while a delete or prune step runs.
+func TestCopyWaitsForBusy(t *testing.T) {
+	var got []string
+	m := listed(t, copyDeps(t, &got, nil), "origin/master")
+	m.busy = "pruning"
+	if _, cmd := keys(t, m, "c"); cmd != nil {
+		t.Error("c starts a command while a step runs")
+	}
+}
+
+// TestFooterWraps: a footer that does not fit wraps at the separators, and
+// the table gives up rows for the extra lines.
+func TestFooterWraps(t *testing.T) {
+	const w, h = 50, 10
+	m := loaded(t)
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: w, Height: h})
+	lines := strings.Split(m.View(), "\n")
+	if len(lines) > h {
+		t.Errorf("%d lines, want at most %d:\n%s", len(lines), h, m.View())
+	}
+	var foot []string
+	for _, l := range lines {
+		if lipgloss.Width(l) > w {
+			t.Errorf("line too wide (%d): %q", lipgloss.Width(l), l)
+		}
+		if strings.Contains(l, "switch") || strings.Contains(l, "quit") || strings.Contains(l, "delete") {
+			foot = append(foot, l)
+		}
+	}
+	all := strings.Join(foot, " · ")
+	if len(foot) < 2 || strings.Contains(all, "…") {
+		t.Errorf("footer does not wrap: %q", foot)
+	}
+	for _, k := range []string{"enter switch", "o open", "c copy", "d delete", "D delete + branch", "p prune", "f fetch", "/ filter", "q quit"} {
+		if !strings.Contains(all, k) {
+			t.Errorf("footer lacks %q: %q", k, foot)
+		}
+	}
+	for _, l := range foot {
+		if strings.HasSuffix(l, "·") || strings.HasPrefix(l, " ·") {
+			t.Errorf("footer line breaks inside a separator: %q", l)
+		}
+	}
+	if n := branchRows(m.View()); n != h-6-(len(foot)-1) {
+		t.Errorf("%d table rows with %d footer lines", n, len(foot))
+	}
 }

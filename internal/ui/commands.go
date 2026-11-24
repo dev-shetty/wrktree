@@ -171,3 +171,13 @@ func pruneCmd(r git.Runner, n int) tea.Cmd {
 		return prunedMsg{n: n, err: r.Prune(context.Background())}
 	}
 }
+
+type copiedMsg struct {
+	text string
+	err  error
+}
+
+// copyCmd puts text on the clipboard with put, away from the event loop.
+func copyCmd(put func(string) error, text string) tea.Cmd {
+	return func() tea.Msg { return copiedMsg{text: text, err: put(text)} }
+}
