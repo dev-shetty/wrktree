@@ -70,6 +70,10 @@ func (m Model) View() string {
 	return strings.Join(lines, "\n")
 }
 
+// rightMargin is the count of columns that stay empty at the right end of the
+// title. A terminal scroll bar can hide the last column.
+const rightMargin = 2
+
 func (m Model) title(w int) string {
 	left := " wrktree · " + m.d.Name
 	if !m.loaded || m.loadErr != nil {
@@ -96,7 +100,7 @@ func (m Model) title(w int) string {
 		}
 		right += " · " + t
 	}
-	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	gap := w - rightMargin - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return left
 	}

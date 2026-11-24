@@ -222,8 +222,8 @@ func TestTitleTotal(t *testing.T) {
 	if !strings.HasPrefix(title, " wrktree · mono") || !strings.HasSuffix(title, "3 worktrees · "+want) {
 		t.Errorf("title = %q, want total %s", title, want)
 	}
-	if lipgloss.Width(title) != 120 {
-		t.Errorf("title width %d, want 120", lipgloss.Width(title))
+	if want := 120 - rightMargin; lipgloss.Width(title) != want {
+		t.Errorf("title width %d, want %d", lipgloss.Width(title), want)
 	}
 }
 
