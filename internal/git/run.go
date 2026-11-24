@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -55,6 +56,12 @@ const waitDelay = 2 * time.Second
 // command builds every git call: the global flags, the environment, and the
 // wait delay. A command that only reads gets --no-optional-locks, so that it
 // never takes index.lock from a git command in another terminal.
+//
+// A fetch runs in the background, so it must not ask for a password or a
+// passphrase on the terminal. It starts in a new session with no stdin:
+// then git and its ssh child have no controlling terminal and cannot open
+// /dev/tty. The context still kills git and its children, and WaitDelay
+// stops the wait for a child that keeps the pipes open.
 func (r Runner) command(ctx context.Context, args ...string) *exec.Cmd {
 	full := []string{"-C", r.Dir}
 	if readOnly(args) {
@@ -63,8 +70,17 @@ func (r Runner) command(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", append(full, args...)...)
 	cmd.Env = gitEnv(os.Environ(), args)
 	cmd.WaitDelay = waitDelay
+	if isFetch(args) {
+		cmd.Stdin = nil
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		// The new session is a process group with the id of git. At the end
+		// of the context, kill the whole group, so that ssh stops too.
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	}
 	return cmd
 }
+
+func isFetch(args []string) bool { return len(args) > 0 && args[0] == "fetch" }
 
 // readOnly reports whether the git command args only reads the repository.
 func readOnly(args []string) bool {
@@ -80,30 +96,20 @@ func readOnly(args []string) bool {
 	return false
 }
 
-// gitEnv returns the environment of the git command args. A fetch runs in
-// the background, so it must not ask for a password or a passphrase on the
-// terminal. A GIT_SSH_COMMAND of the user stays.
+// gitEnv returns the environment of the git command args. A fetch gets
+// GIT_TERMINAL_PROMPT=0, so git does not ask for a user name or a password.
+// The ssh command and the askpass settings of the user stay as they are.
 func gitEnv(environ, args []string) []string {
-	if len(args) == 0 || args[0] != "fetch" {
+	if !isFetch(args) {
 		return environ
 	}
-	env := make([]string, 0, len(environ)+2)
-	userSSH := false
+	env := make([]string, 0, len(environ)+1)
 	for _, kv := range environ {
-		k, v, _ := strings.Cut(kv, "=")
-		switch {
-		case k == "GIT_TERMINAL_PROMPT":
-			continue
-		case k == "GIT_SSH_COMMAND" && v != "":
-			userSSH = true
+		if k, _, _ := strings.Cut(kv, "="); k != "GIT_TERMINAL_PROMPT" {
+			env = append(env, kv)
 		}
-		env = append(env, kv)
 	}
-	env = append(env, "GIT_TERMINAL_PROMPT=0")
-	if !userSSH {
-		env = append(env, "GIT_SSH_COMMAND=ssh -oBatchMode=yes")
-	}
-	return env
+	return append(env, "GIT_TERMINAL_PROMPT=0")
 }
 
 // In returns a Runner for the same repository in a different directory.

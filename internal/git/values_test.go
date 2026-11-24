@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -149,5 +150,26 @@ func TestFetchBaseRemoteWithSlash(t *testing.T) {
 	}
 	if _, behind, err := r.Distance(ctx, repo.Dir, "up/stream/master"); err != nil || behind != 1 {
 		t.Errorf("behind = %d, err = %v; want 1", behind, err)
+	}
+}
+
+// A fetch in a new session still stops at the end of its context. The ssh
+// child that keeps the pipes open does not hold FetchBase.
+func TestFetchBaseTimeout(t *testing.T) {
+	repo := testrepo.New(t)
+	repo.Git(t, repo.Dir, "remote", "set-url", "origin", "ssh://example.invalid/repo.git")
+	t.Setenv("GIT_SSH_COMMAND", "sleep 29.7 #")
+	r := open(t, repo.Dir)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := r.FetchBase(ctx, "origin/master")
+	if d := time.Since(start); err == nil || d > 10*time.Second {
+		t.Errorf("FetchBase = %v after %v; want an error within 10s", err, d)
+	}
+	// The ssh child is killed with git.
+	time.Sleep(200 * time.Millisecond)
+	if out, _ := exec.Command("pgrep", "-f", "sleep 29.7").Output(); len(out) > 0 {
+		t.Errorf("ssh child still runs: %s", out)
 	}
 }

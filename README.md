@@ -216,7 +216,7 @@ When the screen opens, `wrktree` runs `git fetch <remote> <branch>` for the base
 - When the fetch is complete, `wrktree` calculates the distances again.
 - The fetch stops after 15 seconds. If the fetch fails, the distances stay dim and the screen shows `fetch failed: distances can be stale`.
 - `wrktree ls` does not fetch unless you add `--fetch`.
-- The fetch cannot ask for a password or a passphrase. `wrktree` sets `GIT_TERMINAL_PROMPT=0`. If you did not set `GIT_SSH_COMMAND`, it also sets `GIT_SSH_COMMAND="ssh -oBatchMode=yes"`. A fetch that needs a password fails.
+- The fetch cannot ask for a password or a passphrase on the terminal. `wrktree` sets `GIT_TERMINAL_PROMPT=0` and starts the fetch with no terminal. Your ssh command and askpass settings stay in effect. A fetch that needs a typed password fails.
 
 To stop the fetch when the screen opens, set `fetch = false`.
 

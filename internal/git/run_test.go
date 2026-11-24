@@ -63,8 +63,9 @@ func TestGitEnv(t *testing.T) {
 	if v, _ := envValue(env, "GIT_TERMINAL_PROMPT"); v != "0" {
 		t.Errorf("GIT_TERMINAL_PROMPT = %q, want 0", v)
 	}
-	if v, _ := envValue(env, "GIT_SSH_COMMAND"); v != "ssh -oBatchMode=yes" {
-		t.Errorf("GIT_SSH_COMMAND = %q", v)
+	// The ssh command of the user (core.sshCommand) must stay in effect.
+	if v, ok := envValue(env, "GIT_SSH_COMMAND"); ok {
+		t.Errorf("GIT_SSH_COMMAND = %q, want it not set", v)
 	}
 	if v, _ := envValue(env, "HOME"); v != "/h" {
 		t.Errorf("HOME = %q", v)
@@ -84,15 +85,27 @@ func TestGitEnv(t *testing.T) {
 	}
 }
 
-// The real fetch command gets the environment.
-func TestFetchCommandEnv(t *testing.T) {
+// The real fetch command gets the environment and runs in a new session
+// with no stdin, so neither git nor ssh can open the terminal for a prompt.
+// Other git calls do not.
+func TestFetchCommandNoTerminal(t *testing.T) {
 	t.Setenv("GIT_SSH_COMMAND", "")
-	cmd := Runner{Dir: "/r"}.command(context.Background(), "fetch", "origin", "master")
+	os.Unsetenv("GIT_SSH_COMMAND")
+	r := Runner{Dir: "/r"}
+	cmd := r.command(context.Background(), "fetch", "origin", "master")
 	if v, _ := envValue(cmd.Env, "GIT_TERMINAL_PROMPT"); v != "0" {
 		t.Errorf("GIT_TERMINAL_PROMPT = %q, want 0", v)
 	}
-	if v, _ := envValue(cmd.Env, "GIT_SSH_COMMAND"); v != "ssh -oBatchMode=yes" {
-		t.Errorf("GIT_SSH_COMMAND = %q", v)
+	if v, ok := envValue(cmd.Env, "GIT_SSH_COMMAND"); ok {
+		t.Errorf("GIT_SSH_COMMAND = %q, want it not set", v)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid || cmd.Stdin != nil {
+		t.Errorf("fetch: SysProcAttr %+v, Stdin %v; want Setsid and no stdin", cmd.SysProcAttr, cmd.Stdin)
+	}
+	for _, args := range [][]string{{"status"}, {"worktree", "remove", "/r/x"}, {"branch", "-d", "x"}} {
+		if c := r.command(context.Background(), args...); c.SysProcAttr != nil && c.SysProcAttr.Setsid {
+			t.Errorf("%v runs in a new session", args)
+		}
 	}
 }
 
