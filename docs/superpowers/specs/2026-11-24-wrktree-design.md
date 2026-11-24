@@ -114,6 +114,9 @@ If the current directory is not in a git repository, each command prints
 ```
 
 - `●` marks the worktree of the current directory. `›` marks the cursor.
+- The cursor row is bold, in ANSI color 6 (cyan). The row has one color:
+  cells that are dim on other rows are not dim on the cursor row. The other
+  rows do not change.
 - The main worktree is always the first row. The other rows sort by last
   commit time, newest first.
 - A locked worktree shows a lock mark after the branch name.

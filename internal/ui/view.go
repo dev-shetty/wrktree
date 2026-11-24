@@ -38,6 +38,8 @@ var renderer = lipgloss.NewRenderer(os.Stderr)
 var (
 	dim   = renderer.NewStyle().Faint(true)
 	green = renderer.NewStyle().Foreground(lipgloss.Color("2"))
+	// selected draws the whole cursor row in one style.
+	selected = renderer.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 )
 
 // cell is one table cell. Text is plain. Dim draws it faint.
@@ -264,7 +266,7 @@ func (m Model) table(w, extra int) []string {
 	for j, h := range heads {
 		headCells[j] = cell{text: h, dim: true}
 	}
-	lines := []string{"   " + joinRow(dim.Render(pad("BRANCH", branchWidth)), headCells, widths, show)}
+	lines := []string{"   " + joinRow(dim.Render(pad("BRANCH", branchWidth)), headCells, widths, show, true)}
 
 	cells := make(map[string][]cell, len(m.rows))
 	for i, r := range m.rows {
@@ -295,7 +297,13 @@ func (m Model) table(w, extra int) []string {
 		case r.Current:
 			mark = currentMark
 		}
-		lines = append(lines, " "+mark+" "+joinRow(branchCell(r, branchWidth), cells[r.WT.Path], widths, show))
+		// The cursor row is one color: its cells have no style of their own.
+		styled := i != cur
+		line := " " + mark + " " + joinRow(branchCell(r, branchWidth, styled), cells[r.WT.Path], widths, show, styled)
+		if !styled {
+			line = selected.Render(line)
+		}
+		lines = append(lines, line)
 	}
 	return lines
 }
@@ -303,30 +311,35 @@ func (m Model) table(w, extra int) []string {
 // branchCell draws the name in width columns. The folder note is dim and the
 // merged mark is green. A name that does not fit ends with "…". The cut
 // removes the folder note first, then shortens the branch and keeps the
-// marks: " ✓ merged", "[locked]", and "[missing]".
-func branchCell(r status.Row, width int) string {
+// marks: " ✓ merged", "[locked]", and "[missing]". If styled is false,
+// the cell has no styles.
+func branchCell(r status.Row, width int, styled bool) string {
 	plain, note, marks := status.Plain(r), status.FolderNote(r), status.Marks(r)
 	pw, mw := lipgloss.Width(plain), lipgloss.Width(marks)
-	styled := styleMarks(marks)
 	full := status.Name(r)
+	if styled {
+		marks = styleMarks(marks)
+	}
 	switch {
 	case lipgloss.Width(full) <= width:
 		s := plain
-		if note != "" {
+		if note != "" && styled {
 			s += " " + dim.Render(note)
+		} else if note != "" {
+			s += " " + note
 		}
-		return s + styled + strings.Repeat(" ", width-lipgloss.Width(full))
+		return s + marks + strings.Repeat(" ", width-lipgloss.Width(full))
 	case pw+mw <= width:
 		// Part of the folder note fits, if it has room for " (…".
 		tail := ""
 		if extra := width - pw - mw; note != "" && extra >= 3 {
 			tail = ellipsize(" "+note, extra)
 		}
-		return pad(plain+tail, width-mw) + styled
+		return pad(plain+tail, width-mw) + marks
 	case width-mw >= 2:
-		return pad(ellipsize(plain, width-mw), width-mw) + styled
+		return pad(ellipsize(plain, width-mw), width-mw) + marks
 	}
-	return pad(ellipsize(plain+marks, width), width)
+	return pad(ellipsize(plain+status.Marks(r), width), width)
 }
 
 // styleMarks draws the merged mark green. The other marks stay plain.
@@ -338,8 +351,8 @@ func styleMarks(marks string) string {
 }
 
 // joinRow joins the branch cell and the shown cells with two spaces. The
-// last cell has no padding.
-func joinRow(branch string, cs []cell, widths []int, show []bool) string {
+// last cell has no padding. If styled is false, no cell is dim.
+func joinRow(branch string, cs []cell, widths []int, show []bool, styled bool) string {
 	var b strings.Builder
 	b.WriteString(branch)
 	last := -1
@@ -354,7 +367,7 @@ func joinRow(branch string, cs []cell, widths []int, show []bool) string {
 		}
 		b.WriteString("  ")
 		text := c.text
-		if c.dim {
+		if c.dim && styled {
 			text = dim.Render(text)
 		}
 		b.WriteString(text)

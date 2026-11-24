@@ -18,6 +18,7 @@
 
 - `●` marks the worktree of the current directory.
 - `›` marks the cursor. When the screen opens, the cursor is on the worktree of the current directory.
+- The cursor row is bold and cyan. All cells of that row have this one color. No cell of that row is dim.
 - `CHANGES` is the number of changed files. Untracked files count.
 - `↑` is the number of commits that the worktree has and the base branch does not have.
 - `↓` is the number of commits that the worktree is behind the base branch.

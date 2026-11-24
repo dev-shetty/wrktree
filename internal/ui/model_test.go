@@ -582,7 +582,7 @@ func TestCutKeepsMarks(t *testing.T) {
 	// The label with its marks fills the width exactly: no mark is cut.
 	r := status.Row{WT: git.Worktree{Path: "/r/other-folder", Branch: "feat", Locked: true, Prunable: true}}
 	label := status.Label(r)
-	if got := branchCell(r, lipgloss.Width(label)); got != label {
+	if got := branchCell(r, lipgloss.Width(label), true); got != label {
 		t.Errorf("branchCell at the label width = %q, want %q", got, label)
 	}
 }
@@ -831,4 +831,51 @@ func TestMergedCmd(t *testing.T) {
 	if c := mergedCmd(r, feat, "origin/master")().(mergedMsg); c.err != nil || !c.merged || !c.ok || c.path != feat {
 		t.Errorf("merged: %+v", c)
 	}
+}
+
+// TestCursorRowColor: the cursor row is bold cyan, with no other style in
+// it. Other rows do not change. No styled line is wider than the terminal.
+func TestCursorRowColor(t *testing.T) {
+	old := renderer.ColorProfile()
+	renderer.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { renderer.SetColorProfile(old) })
+	const (
+		boldCyan = "\x1b[1;36m"
+		faint    = "\x1b[2m"
+	)
+	m := loaded(t)
+	m, _ = send(t, m, fetchMsg{err: errors.New("timeout")}) // dims the distances
+	m, _ = send(t, m, mergedMsg{path: alertPath, merged: true, ok: true})
+	m, _ = keys(t, m, "j", "j") // main, flows, alert: the cursor goes to alert
+	v := m.View()
+	cur := lineWith(t, v, "eng-6201")
+	if !strings.Contains(cur, cursorMark) || !strings.HasPrefix(cur, boldCyan) {
+		t.Errorf("cursor row is not bold cyan: %q", cur)
+	}
+	if strings.Contains(cur, faint) || strings.Contains(cur, "\x1b[32m") {
+		t.Errorf("cursor row has a second style: %q", cur)
+	}
+	other := lineWith(t, v, "eng-6458")
+	if strings.Contains(other, boldCyan) || !strings.Contains(other, faint) {
+		t.Errorf("other row: %q", other)
+	}
+	if l := lineWith(t, v, "(mono)"); strings.Contains(l, boldCyan) || !strings.Contains(l, faint+"(mono)") {
+		t.Errorf("main row: %q", l)
+	}
+	for _, w := range []int{40, 50, 70} {
+		m, _ = send(t, m, tea.WindowSizeMsg{Width: w, Height: 20})
+		for _, l := range strings.Split(m.View(), "\n") {
+			if lipgloss.Width(l) > w {
+				t.Errorf("width %d: styled line too wide (%d): %q", w, lipgloss.Width(l), l)
+			}
+		}
+	}
+}
+
+// TestNarrowTerminalStyled is TestNarrowTerminal with styles on.
+func TestNarrowTerminalStyled(t *testing.T) {
+	old := renderer.ColorProfile()
+	renderer.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { renderer.SetColorProfile(old) })
+	TestNarrowTerminal(t)
 }
