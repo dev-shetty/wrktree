@@ -38,6 +38,9 @@ func (r Runner) Run(ctx context.Context, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
 	}
 	return strings.TrimSuffix(stdout.String(), "\n"), nil

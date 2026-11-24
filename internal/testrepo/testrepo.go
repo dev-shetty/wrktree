@@ -2,6 +2,7 @@
 package testrepo
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,7 +49,13 @@ func (r *Repo) Git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	cmd.Env = append(env,
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_AUTHOR_NAME=Test",
@@ -56,10 +63,13 @@ func (r *Repo) Git(t *testing.T, dir string, args ...string) string {
 		"GIT_COMMITTER_NAME=Test",
 		"GIT_COMMITTER_EMAIL=test@example.com",
 	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s (in %s): %v\n%s", strings.Join(args, " "), dir, err, out)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git %s (in %s): %v\n%s%s", strings.Join(args, " "), dir, err, stdout.String(), stderr.String())
 	}
+	out := stdout.Bytes()
 	return strings.TrimRight(string(out), "\n")
 }
 
