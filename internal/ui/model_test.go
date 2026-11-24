@@ -372,14 +372,6 @@ func TestQuitKeys(t *testing.T) {
 	}
 }
 
-func TestDeleteAndPruneKeysDoNothing(t *testing.T) {
-	m := loaded(t)
-	m, cmd := keys(t, m, "d", "p")
-	if cmd != nil || m.Result() != (Result{}) {
-		t.Errorf("d or p did something: cmd %v, Result %+v", cmd != nil, m.Result())
-	}
-}
-
 func branchRows(v string) int {
 	n := 0
 	for _, l := range strings.Split(v, "\n") {

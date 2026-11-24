@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-shetty/wrktree/internal/disk"
+	"github.com/dev-shetty/wrktree/internal/git"
 	"github.com/dev-shetty/wrktree/internal/status"
 )
 
@@ -19,6 +21,8 @@ const (
 	fetchFailed  = "fetch failed: distances can be stale"
 	keyFooter    = " enter switch · o open · d delete · p prune · f fetch · / filter · q quit"
 	filterFooter = " enter keep filter · esc clear filter"
+	branchOption = "also delete the branch"
+	typedLabel   = "Type yes to delete: "
 	// Below these widths, the columns do not show.
 	commitMinWidth = 60
 	sizeMinWidth   = 45
@@ -45,6 +49,7 @@ func (m Model) View() string {
 	if w <= 0 {
 		w = defaultWidth
 	}
+	footer := m.footer(w)
 	lines := []string{m.title(w), ""}
 	switch {
 	case !m.loaded:
@@ -52,14 +57,10 @@ func (m Model) View() string {
 	case m.loadErr != nil:
 		lines = append(lines, " error: "+m.loadErr.Error())
 	default:
-		lines = append(lines, m.table(w)...)
+		lines = append(lines, m.table(w, len(footer)-1)...)
 	}
 	lines = append(lines, "", m.statusLine())
-	if m.mode == modeFilter {
-		lines = append(lines, filterFooter)
-	} else {
-		lines = append(lines, keyFooter)
-	}
+	lines = append(lines, footer...)
 	cut := renderer.NewStyle().MaxWidth(w)
 	for i, l := range lines {
 		if lipgloss.Width(l) > w {
@@ -109,6 +110,9 @@ func (m Model) statusLine() string {
 		parts = append(parts, "/"+m.filter+"█")
 	case m.filter != "":
 		parts = append(parts, "/"+m.filter)
+	}
+	if m.busy != "" {
+		parts = append(parts, m.busy+pending)
 	}
 	if m.note != "" {
 		parts = append(parts, m.note)
@@ -178,9 +182,66 @@ func (m Model) sizePending(path string) bool {
 	return false
 }
 
-// table draws the header and the rows that fit in the height. The branch
-// column shrinks first. Narrow terminals hide LAST COMMIT, then SIZE.
-func (m Model) table(w int) []string {
+// footer returns the last lines of the screen: the key help, or a prompt.
+// A prompt replaces the key help.
+func (m Model) footer(w int) []string {
+	switch m.mode {
+	case modeFilter:
+		return []string{filterFooter}
+	case modeConfirm, modeTyped:
+		return m.deletePrompt(w)
+	case modePrune:
+		var lines []string
+		for _, l := range m.pruneLines {
+			lines = append(lines, wrap(l, w)...)
+		}
+		return append(lines, wrap(fmt.Sprintf("Prune %d entries? y/N", len(m.pruneLines)), w)...)
+	}
+	return []string{keyFooter}
+}
+
+// deletePrompt returns the lines of the delete prompt: the text of
+// git.DeletePrompt, the branch option, the typed answer, and the key hint.
+func (m Model) deletePrompt(w int) []string {
+	lines := wrap(strings.TrimSpace(git.DeletePrompt(m.del.wt, m.del.plan)), w)
+	hasBranch := m.del.wt.Branch != ""
+	if hasBranch {
+		box := "[ ] "
+		if m.del.branch {
+			box = "[x] "
+		}
+		lines = append(lines, wrap(box+branchOption, w)...)
+	}
+	var hint string
+	switch {
+	case m.mode == modeTyped && hasBranch:
+		hint = "type yes + enter · tab branch · esc cancel"
+	case m.mode == modeTyped:
+		hint = "type yes + enter · esc cancel"
+	case hasBranch:
+		hint = "y delete · b branch · any other key cancel"
+	default:
+		hint = "y delete · any other key cancel"
+	}
+	if m.mode == modeTyped {
+		lines = append(lines, wrap(typedLabel+m.typed+"█", w)...)
+	}
+	return append(lines, wrap(hint, w)...)
+}
+
+// wrap breaks s into lines of at most w columns. Each line starts with one space.
+func wrap(s string, w int) []string {
+	var out []string
+	for _, l := range strings.Split(ansi.Wrap(s, max(w-1, 1), ""), "\n") {
+		out = append(out, " "+l)
+	}
+	return out
+}
+
+// table draws the header and the rows that fit in the height. extra is the
+// number of footer lines after the first. The branch column shrinks first.
+// Narrow terminals hide LAST COMMIT, then SIZE.
+func (m Model) table(w, extra int) []string {
 	distHead := m.base
 	if distHead == "" {
 		distHead = "BASE"
@@ -228,7 +289,7 @@ func (m Model) table(w int) []string {
 	}
 	cur := m.cursorIndex()
 	start, end := 0, len(vis)
-	if body := m.height - chromeLines; m.height > 0 && body < len(vis) {
+	if body := m.height - chromeLines - extra; m.height > 0 && body < len(vis) {
 		body = max(body, 1)
 		if cur >= body {
 			start = cur - body + 1

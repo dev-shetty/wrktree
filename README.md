@@ -1,0 +1,223 @@
+# wrktree
+
+`wrktree` shows all git worktrees of a repository in one table. You can act on a worktree with one key or one short command.
+
+`git worktree list` prints long paths that wrap in the terminal. It does not show disk size, changed files, or the age of a worktree. `wrktree` shows these values, so you can decide quickly which worktrees to keep.
+
+```
+ wrktree · levelsfyi-mono                                  10 worktrees · 14.2 GB
+
+   BRANCH                              CHANGES    origin/master   SIZE     LAST COMMIT
+ ● master                              clean      ↑0 ↓3           3.1 GB   2 hours ago
+ › eng-6201-onboarding-v2-alerts       4 files    ↑2 ↓31          1.4 GB   3 weeks ago
+   eng-6458-bugsink-key-flows          clean      ↑0 ↓12          1.2 GB   9 days ago
+   eng-6882-tp-self-serve-ui           12 files   ↑5 ↓0           …        1 day ago
+
+ enter switch · o open · d delete · p prune · f fetch · / filter · q quit
+```
+
+- `●` marks the worktree of the current directory.
+- `›` marks the cursor.
+- `CHANGES` is the number of changed files. Untracked files count.
+- `↑` is the number of commits that the worktree has and the base branch does not have.
+- `↓` is the number of commits that the worktree is behind the base branch.
+- `…` shows a value that is not available yet.
+- The main worktree is always the first row. The other rows sort by the time of the last commit, newest first.
+
+`wrktree` operates on macOS and Linux, with zsh or bash. It does not create worktrees. Use `git worktree add` to create a worktree.
+
+## Install
+
+You must have Go 1.24 or later.
+
+Install with `go install`:
+
+```sh
+go install github.com/dev-shetty/wrktree@latest
+```
+
+The binary goes to `$(go env GOPATH)/bin`. Make sure that this directory is in your `PATH`.
+
+Or build from the source:
+
+```sh
+git clone https://github.com/dev-shetty/wrktree.git
+cd wrktree
+go build
+```
+
+The build writes the `wrktree` binary to the current directory. Move it to a directory in your `PATH`.
+
+## Shell setup
+
+A program cannot change the directory of your shell. Thus `wrktree` supplies a shell function, `wt`, that changes the directory for you.
+
+For zsh, add this line to `~/.zshrc`:
+
+```sh
+eval "$(wrktree init zsh)"
+```
+
+For bash, add this line to `~/.bashrc`:
+
+```sh
+eval "$(wrktree init bash)"
+```
+
+Then open a new shell. Use `wt` in place of `wrktree`. For example, `wt` opens the screen, and `wt switch 6201` changes the directory.
+
+To give the function a different name, use `--name`:
+
+```sh
+eval "$(wrktree init zsh --name w)"
+```
+
+If you do not install the function, `wrktree switch` prints the path to stdout. Then you can change the directory with `cd "$(wrktree switch 6201)"`.
+
+## The screen
+
+Run `wt` (or `wrktree`) in a git repository. The screen opens.
+
+If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `wrktree ls` does.
+
+| Key | Action |
+|---|---|
+| `↑` `↓` `j` `k` | Move the cursor. |
+| `enter` | Change to the worktree and quit. |
+| `o` | Quit, then run the open command on the worktree. |
+| `d` | Delete the worktree, after a prompt. |
+| `p` | Show the stale worktree entries, then prune them after a prompt. |
+| `f` | Fetch the base branch again, then calculate the distances again. |
+| `/` | Filter the rows by branch name or folder name. |
+| `r` | Read all values again, and measure all disk sizes again. |
+| `q` `esc` `ctrl+c` | Quit. |
+
+The screen draws on stderr. Stdout carries only the path for a directory change.
+
+## Subcommands
+
+| Command | Action |
+|---|---|
+| `wrktree` | Open the screen. |
+| `wrktree ls [--json] [--fetch] [--fresh]` | Print the table one time, with all values. |
+| `wrktree switch <name>` | Change the shell directory to the worktree. |
+| `wrktree open <name>` | Run the open command on the worktree. |
+| `wrktree rm <name> [--force] [--branch]` | Delete the worktree. |
+| `wrktree prune [--yes]` | Remove the entries of worktrees whose folder is missing. |
+| `wrktree init <zsh\|bash> [--name <name>]` | Print the shell function. |
+
+`<name>` is a part of the branch name or of the folder name. Case is not important.
+
+- An exact match of the branch name or the folder name wins. Thus `master` selects `master` when `master-fix` also exists.
+- If more than one worktree matches, the command prints the matches and stops with exit code 1.
+
+`wrktree ls` flags:
+
+- `--json` prints the rows as JSON.
+- `--fetch` fetches the base branch first. Without it, `ls` does not use the network.
+- `--fresh` measures all disk sizes again.
+
+If the current directory is not in a git repository, each command prints `wrktree: not a git repository` and stops with exit code 1.
+
+## Delete
+
+CAUTION: `git worktree remove` also deletes ignored files, for example `.env.local`. `wrktree` cannot tell these files apart from `node_modules`. Thus each delete prompt says that ignored files are deleted too.
+
+These rules apply to `d` in the screen and to `wrktree rm`:
+
+- You cannot delete the main worktree.
+- You cannot delete a locked worktree. The error shows the lock reason.
+- You cannot delete a worktree whose folder is missing. Use prune for it.
+- A clean worktree needs one confirmation. In the screen, press `y`. Every other key cancels.
+- A worktree with changed files needs the typed word `yes`. The prompt shows the number of changed files. Then `wrktree` runs `git worktree remove --force`.
+- A detached worktree with commits that no branch, remote ref, or tag contains also needs the typed word `yes`. The prompt shows the number of these commits.
+- In the screen, type `yes` and press `enter` to delete. Any other text cancels. `esc` cancels.
+
+The branch stays by default.
+
+- In the screen, press `b` in the prompt to also delete the branch. In the typed prompt, press `tab`.
+- With `wrktree rm`, add `--branch`.
+
+`wrktree` deletes the branch with `git branch -d`. Git refuses to delete a branch that is not merged. In that case the worktree is deleted, the branch stays, and `wrktree` shows the git message.
+
+The current worktree:
+
+- `wrktree rm` does not delete the worktree of the current directory.
+- The screen can delete it. After the delete, the shell changes to the main worktree.
+- If the `wt` function is not in use, or the repository has no main worktree, the screen refuses this delete.
+
+`wrktree rm --force` deletes without a prompt. Without a terminal and without `--force`, `wrktree rm` stops with an error on a worktree with changed files.
+
+## Prune
+
+Prune removes the git entries of worktrees whose folder is missing. These rows show `[missing]` in the table.
+
+`wrktree` runs `git worktree prune --dry-run -v` and shows the entries. After you confirm, it runs `git worktree prune`. In the screen, press `y` to prune. Every other key cancels. `wrktree prune --yes` prunes without a prompt.
+
+## Configuration
+
+The configuration file is optional. Its location is `$XDG_CONFIG_HOME/wrktree/config.toml`. If `XDG_CONFIG_HOME` is not set, the location is `~/.config/wrktree/config.toml`.
+
+The file has 4 keys. These are the default values:
+
+```toml
+open = "code -n {path}"   # command that opens a worktree
+base = ""                 # base branch. Empty = detect from origin
+fetch = true              # fetch the base branch when the screen opens
+size_ttl = "24h"          # how long a cached disk size stays valid
+```
+
+An unknown key is an error.
+
+### open
+
+`open` is a command template. `wrktree` replaces each `{path}` with the quoted path of the worktree. If the template has no `{path}`, the path goes at the end. `sh -c` runs the result. The command gets your terminal, so a terminal app also operates.
+
+To open worktrees in Cursor:
+
+```toml
+open = "cursor -n {path}"
+```
+
+To start Claude Code in the worktree:
+
+```toml
+open = "cd {path} && claude"
+```
+
+If the command is not found, `wrktree` shows the command and the path of the configuration file.
+
+### base
+
+The base branch is the default branch of `origin`. `wrktree` reads it from `refs/remotes/origin/HEAD`. If that ref does not exist, `wrktree` tries `origin/main`, then `origin/master`. If no base branch is found, the distance column shows `—`.
+
+To use a different base branch, set `base`:
+
+```toml
+base = "origin/develop"
+```
+
+### fetch
+
+When the screen opens, `wrktree` runs `git fetch origin <base branch>` one time, in the background. All worktrees share one repository, so one fetch serves all rows.
+
+- The screen does not wait for the fetch. The distances show at once from the local copy of the remote ref. They are dim until the fetch is complete.
+- When the fetch is complete, `wrktree` calculates the distances again.
+- The fetch stops after 15 seconds. If the fetch fails, the distances stay dim and the screen shows `fetch failed: distances can be stale`.
+- `wrktree ls` does not fetch unless you add `--fetch`.
+
+To stop the fetch when the screen opens, set `fetch = false`.
+
+### size_ttl
+
+`du` can take many seconds on a large worktree, for example one with `node_modules`. Thus `wrktree` keeps the last size of each worktree in a cache. The cache file is `$XDG_CACHE_HOME/wrktree/sizes.json`, or `~/.cache/wrktree/sizes.json` if `XDG_CACHE_HOME` is not set.
+
+- If a cached size is younger than `size_ttl`, `wrktree` shows it with a `~` prefix, for example `~1.4 GB`. It does not run `du` for that worktree.
+- If a cached size is older than `size_ttl`, `wrktree` shows it dim with the `~` prefix. Then it runs `du` in the background and shows the new size.
+- If a worktree has no cached size, the cell shows `…` until `du` is complete.
+- At most 4 `du` processes run at one time.
+- `r` in the screen and `wrktree ls --fresh` ignore the cache and measure all sizes again.
+
+The cache stores sizes only. The other values are fast, so `wrktree` reads them again each time. When a worktree is deleted, its cache entry is removed.
+
+The value of `size_ttl` is a Go duration, for example `"30m"`, `"24h"`, or `"72h"`.

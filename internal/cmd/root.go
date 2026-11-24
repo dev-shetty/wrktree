@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/dev-shetty/wrktree/internal/git"
 	"github.com/dev-shetty/wrktree/internal/shell"
 	"github.com/dev-shetty/wrktree/internal/status"
+	"github.com/dev-shetty/wrktree/internal/ui"
 )
 
 // Env holds everything that the commands take from the outside.
@@ -30,6 +32,7 @@ type Env struct {
 	IsTerminal     func() bool // stdin and stderr are terminals
 	RunOpen        func(template, path string) error
 	Now            func() time.Time
+	RunScreen      func(ui.Deps) (ui.Result, error) // runs the interactive screen
 }
 
 // errReported means that the command already printed the error text.
@@ -60,10 +63,28 @@ func (e Env) withDefaults() Env {
 	if e.Now == nil {
 		e.Now = time.Now
 	}
+	if e.RunScreen == nil {
+		e.RunScreen = runProgram
+	}
 	return e
 }
 
-// New builds the root command. With no subcommand, it runs ls.
+// runProgram runs the interactive screen. It draws on stderr.
+func runProgram(d ui.Deps) (ui.Result, error) {
+	p := tea.NewProgram(ui.New(d), tea.WithOutput(os.Stderr), tea.WithAltScreen())
+	final, err := p.Run()
+	if err != nil {
+		return ui.Result{}, err
+	}
+	m, ok := final.(ui.Model)
+	if !ok {
+		return ui.Result{}, fmt.Errorf("unexpected screen model %T", final)
+	}
+	return m.Result(), nil
+}
+
+// New builds the root command. With no subcommand, it runs the screen, or
+// ls if stdin or stderr is not a terminal.
 func New(env Env) *cobra.Command {
 	env = env.withDefaults()
 	root := &cobra.Command{
@@ -73,7 +94,10 @@ func New(env Env) *cobra.Command {
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
-			return runLs(c.Context(), env, lsFlags{})
+			if !env.IsTerminal() {
+				return runLs(c.Context(), env, lsFlags{})
+			}
+			return runScreen(c.Context(), env)
 		},
 	}
 	root.SetIn(env.Stdin)
@@ -120,6 +144,57 @@ func open(ctx context.Context, env Env) (*session, error) {
 		ctx = context.Background()
 	}
 	return &session{ctx: ctx, env: env, r: r, cfg: cfg}, nil
+}
+
+// runScreen runs the interactive screen, then does the action that the
+// user selected.
+func runScreen(ctx context.Context, env Env) error {
+	s, err := open(ctx, env)
+	if err != nil {
+		return err
+	}
+	wts, err := s.r.Worktrees(s.ctx)
+	if err != nil {
+		return err
+	}
+	res, err := env.RunScreen(ui.Deps{
+		Git:   s.r,
+		Cfg:   s.cfg,
+		Cache: disk.LoadCache(disk.DefaultCachePath()),
+		Repo:  s.repoKey(wts),
+		Name:  s.r.RepoName(s.ctx),
+		Cwd:   env.Dir,
+		CanCD: os.Getenv(shell.CDFileEnv) != "",
+		Now:   env.Now,
+	})
+	if err != nil {
+		return err
+	}
+	if res.Message != "" {
+		fmt.Fprintf(env.Stderr, "wrktree: %s\n", res.Message)
+	}
+	switch {
+	case res.SwitchPath != "":
+		return shell.WriteCD(res.SwitchPath, env.Stdout, env.Stderr)
+	case res.OpenPath != "":
+		return s.openPath(res.OpenPath)
+	}
+	return nil
+}
+
+// openPath runs the open command on path. A command that is not found gives
+// an error that names the configuration file.
+func (s *session) openPath(path string) error {
+	err := s.env.RunOpen(s.cfg.Open, path)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 127 {
+		prog := s.cfg.Open
+		if f := strings.Fields(prog); len(f) > 0 {
+			prog = f[0]
+		}
+		return fmt.Errorf("open command %q not found: set open in %s", prog, config.Path())
+	}
+	return err
 }
 
 // base returns the base branch, or "" if the repository has none.
@@ -253,16 +328,7 @@ func newOpen(env Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = env.RunOpen(s.cfg.Open, w.Path)
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) && exitErr.ExitCode() == 127 {
-				prog := s.cfg.Open
-				if f := strings.Fields(prog); len(f) > 0 {
-					prog = f[0]
-				}
-				return fmt.Errorf("open command %q not found: set open in %s", prog, config.Path())
-			}
-			return err
+			return s.openPath(w.Path)
 		},
 	}
 }

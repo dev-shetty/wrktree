@@ -100,3 +100,61 @@ func fetchCmd(r git.Runner, base string) tea.Cmd {
 		return fetchMsg{err: r.FetchBase(ctx, base)}
 	}
 }
+
+type planMsg struct {
+	wt   git.Worktree
+	plan git.DeletePlan
+	err  error
+}
+
+type removedMsg struct {
+	path           string
+	err, branchErr error
+}
+
+type pruneListMsg struct {
+	lines []string
+	err   error
+}
+
+type prunedMsg struct {
+	n   int
+	err error
+}
+
+func planCmd(r git.Runner, wt git.Worktree) tea.Cmd {
+	return func() tea.Msg {
+		p, err := r.PlanDelete(context.Background(), wt)
+		return planMsg{wt: wt, plan: p, err: err}
+	}
+}
+
+// removeCmd deletes the worktree, then the branch if branch is true. A
+// branch error does not undo the delete.
+func removeCmd(r git.Runner, wt git.Worktree, force, branch bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := r.Remove(ctx, wt.Path, force); err != nil {
+			return removedMsg{path: wt.Path, err: err}
+		}
+		var berr error
+		if branch && wt.Branch != "" {
+			berr = r.DeleteBranch(ctx, wt.Branch)
+		}
+		return removedMsg{path: wt.Path, branchErr: berr}
+	}
+}
+
+func pruneListCmd(r git.Runner) tea.Cmd {
+	return func() tea.Msg {
+		lines, err := r.PruneDryRun(context.Background())
+		return pruneListMsg{lines: lines, err: err}
+	}
+}
+
+// pruneCmd prunes the stale entries. n is the count that the prompt showed.
+func pruneCmd(r git.Runner, n int) tea.Cmd {
+	return func() tea.Msg {
+		return prunedMsg{n: n, err: r.Prune(context.Background())}
+	}
+}
