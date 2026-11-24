@@ -68,7 +68,8 @@ func (r Runner) Distance(ctx context.Context, path, base string) (ahead, behind 
 
 // LastCommit returns the commit time of HEAD in the worktree at path.
 func (r Runner) LastCommit(ctx context.Context, path string) (time.Time, error) {
-	out, err := r.In(path).Run(ctx, "log", "-1", "--format=%ct")
+	// With log.showSignature, git prints signature lines before the time.
+	out, err := r.In(path).Run(ctx, "log", "-1", "--no-show-signature", "--format=%ct")
 	if err != nil {
 		return time.Time{}, err
 	}

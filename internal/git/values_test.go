@@ -91,6 +91,19 @@ func TestLastCommit(t *testing.T) {
 	}
 }
 
+// With log.showSignature, git log prints a signature line before the time.
+func TestLastCommitShowSignature(t *testing.T) {
+	repo := testrepo.New(t)
+	repo.Git(t, repo.Dir, "config", "log.showSignature", "true")
+	got, err := open(t, repo.Dir).LastCommit(context.Background(), repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(got); d < -time.Minute || d > time.Minute {
+		t.Errorf("LastCommit = %v, not within 1 minute of now", got)
+	}
+}
+
 func TestFetchBase(t *testing.T) {
 	ctx := context.Background()
 	repo := testrepo.New(t)
