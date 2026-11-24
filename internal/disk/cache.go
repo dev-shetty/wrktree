@@ -19,6 +19,10 @@ type Cache struct {
 	file string
 	mu   sync.Mutex
 	m    map[string]Entry
+	// changed holds the keys that this process set (true) or removed (false)
+	// after the last Save. Save writes only these keys to the file, so it
+	// keeps the entries that a different process wrote.
+	changed map[string]bool
 }
 
 func key(repo, path string) string { return repo + "\x00" + path }
@@ -39,17 +43,21 @@ func DefaultCachePath() string {
 
 // LoadCache reads file. A missing or damaged file gives an empty cache.
 func LoadCache(file string) *Cache {
-	c := &Cache{file: file, m: map[string]Entry{}}
+	return &Cache{file: file, m: readFile(file), changed: map[string]bool{}}
+}
+
+// readFile returns the entries of file. A missing or damaged file gives an
+// empty map.
+func readFile(file string) map[string]Entry {
 	data, err := os.ReadFile(file)
 	if err != nil {
-		return c
+		return map[string]Entry{}
 	}
 	var m map[string]Entry
 	if json.Unmarshal(data, &m) != nil || m == nil {
-		return c
+		return map[string]Entry{}
 	}
-	c.m = m
-	return c
+	return m
 }
 
 func (c *Cache) Get(repo, path string) (Entry, bool) {
@@ -63,12 +71,14 @@ func (c *Cache) Set(repo, path string, bytes int64, at time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.m[key(repo, path)] = Entry{Bytes: bytes, At: at}
+	c.changed[key(repo, path)] = true
 }
 
 func (c *Cache) Delete(repo, path string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.m, key(repo, path))
+	c.changed[key(repo, path)] = false
 }
 
 // Retain removes the entries of repo whose path is not in paths.
@@ -83,19 +93,37 @@ func (c *Cache) Retain(repo string, paths []string) {
 	for k := range c.m {
 		if len(k) >= len(prefix) && k[:len(prefix)] == prefix && !keep[k] {
 			delete(c.m, k)
+			c.changed[k] = false
 		}
 	}
 }
 
-// Save writes the cache to disk. It creates the directory. It writes a
-// temporary file, then renames it.
+// Save writes the cache to disk. It creates the directory. It reads the
+// file again and applies only the changes of this process, so the entries
+// of a different process stay. It writes a temporary file, then renames it.
 func (c *Cache) Save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	data, err := json.Marshal(c.m)
+	disk := readFile(c.file)
+	for k, set := range c.changed {
+		if set {
+			disk[k] = c.m[k]
+		} else {
+			delete(disk, k)
+		}
+	}
+	data, err := json.Marshal(disk)
 	if err != nil {
 		return err
 	}
+	if err := c.write(data); err != nil {
+		return err
+	}
+	c.changed = map[string]bool{}
+	return nil
+}
+
+func (c *Cache) write(data []byte) error {
 	dir := filepath.Dir(c.file)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

@@ -97,3 +97,60 @@ func TestDefaultCachePath(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// Two caches of one file stand for two processes. A Save of one cache keeps
+// the entries that the other cache wrote after the load.
+func TestCacheSaveKeepsOtherProcess(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "sizes.json")
+	at := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	seed := LoadCache(file)
+	seed.Set("/a", "/a/old", 1, at)
+	seed.Set("/b", "/b/gone", 2, at)
+	if err := seed.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	one, two := LoadCache(file), LoadCache(file)
+	two.Set("/b", "/b/new", 20, at)
+	two.Delete("/b", "/b/gone")
+	if err := two.Save(); err != nil {
+		t.Fatal(err)
+	}
+	one.Set("/a", "/a/new", 10, at)
+	if err := one.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := LoadCache(file)
+	for _, k := range [][2]string{{"/a", "/a/old"}, {"/a", "/a/new"}, {"/b", "/b/new"}} {
+		if _, ok := got.Get(k[0], k[1]); !ok {
+			t.Errorf("%s is lost", k[1])
+		}
+	}
+	if _, ok := got.Get("/b", "/b/gone"); ok {
+		t.Error("/b/gone came back: the Save of process one wrote its old copy")
+	}
+}
+
+// Retain removes the entries from the file too.
+func TestCacheRetainSaved(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "sizes.json")
+	at := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	c := LoadCache(file)
+	c.Set("/a", "/a/x", 1, at)
+	c.Set("/a", "/a/y", 2, at)
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	c.Retain("/a", []string{"/a/x"})
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got := LoadCache(file)
+	if _, ok := got.Get("/a", "/a/y"); ok {
+		t.Error("/a/y stays in the file")
+	}
+	if _, ok := got.Get("/a", "/a/x"); !ok {
+		t.Error("/a/x is lost")
+	}
+}
