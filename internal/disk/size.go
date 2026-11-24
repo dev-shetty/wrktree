@@ -43,16 +43,17 @@ func Human(b int64) string {
 		mb = kb * 1024
 		gb = mb * 1024
 	)
-	switch {
-	case b <= 0:
+	if b <= 0 {
 		return "0 KB"
-	case b < mb:
-		return fmt.Sprintf("%d KB", max(1, (b+kb/2)/kb))
-	case b < gb:
-		return fmt.Sprintf("%d MB", (b+mb/2)/mb)
-	default:
-		return fmt.Sprintf("%.1f GB", float64(b)/float64(gb))
 	}
+	// Round first, then pick the unit, so no value shows as "1024 KB" or "1024 MB".
+	if k := max(1, (b+kb/2)/kb); k < 1024 {
+		return fmt.Sprintf("%d KB", k)
+	}
+	if m := (b + mb/2) / mb; m < 1024 {
+		return fmt.Sprintf("%d MB", m)
+	}
+	return fmt.Sprintf("%.1f GB", float64(b)/float64(gb))
 }
 
 // State tells how a shown size was obtained.
