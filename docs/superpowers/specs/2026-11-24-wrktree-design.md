@@ -125,7 +125,7 @@ Keys:
 
 | Key | Action |
 |---|---|
-| `↑` `↓` `j` `k` | Move the cursor. |
+| `↑` `↓` `←` `→` `j` `k` | Move the cursor. `←` moves up and `→` moves down. The cursor wraps from the first row to the last row and back. |
 | `enter` | Switch to the worktree and quit. |
 | `o` | Quit, then run the open command on the worktree. |
 | `d` | Delete the worktree. The branch stays. A clean worktree has no prompt. |

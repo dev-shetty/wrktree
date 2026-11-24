@@ -315,13 +315,52 @@ func TestCursorMoves(t *testing.T) {
 	if m.cursorIndex() != 1 {
 		t.Errorf("cursor = %d, want 1", m.cursorIndex())
 	}
-	m, _ = keys(t, m, "k", "k", "up")
-	if m.cursorIndex() != 0 {
-		t.Errorf("cursor = %d, want 0 at the top", m.cursorIndex())
-	}
-	m, _ = keys(t, m, "j", "down", "j", "j")
+	m, _ = keys(t, m, "up", "down", "down")
 	if m.cursorIndex() != 2 {
-		t.Errorf("cursor = %d, want 2 at the bottom", m.cursorIndex())
+		t.Errorf("cursor = %d, want 2", m.cursorIndex())
+	}
+}
+
+// TestCursorLeftRight makes sure that left moves as up and right moves as down.
+func TestCursorLeftRight(t *testing.T) {
+	m := loaded(t)
+	m, _ = keys(t, m, "right", "right")
+	if m.cursorIndex() != 2 {
+		t.Errorf("after right, right: cursor = %d, want 2", m.cursorIndex())
+	}
+	m, _ = keys(t, m, "left")
+	if m.cursorIndex() != 1 {
+		t.Errorf("after left: cursor = %d, want 1", m.cursorIndex())
+	}
+}
+
+// TestCursorWraps makes sure that the cursor goes from the first row to the
+// last row and back, with each move key.
+func TestCursorWraps(t *testing.T) {
+	for _, pair := range [][2]string{{"up", "down"}, {"k", "j"}, {"left", "right"}} {
+		m := loaded(t)
+		m, _ = keys(t, m, pair[0])
+		if m.cursorIndex() != 2 {
+			t.Errorf("%s at the first row: cursor = %d, want the last row 2", pair[0], m.cursorIndex())
+		}
+		m, _ = keys(t, m, pair[1])
+		if m.cursorIndex() != 0 {
+			t.Errorf("%s at the last row: cursor = %d, want the first row 0", pair[1], m.cursorIndex())
+		}
+	}
+}
+
+// TestCursorWrapsInFilter makes sure that the wrap uses the rows that show.
+func TestCursorWrapsInFilter(t *testing.T) {
+	m := loaded(t)
+	m, _ = keys(t, m, "/", "e", "n", "g", "enter")
+	if n := len(m.visible()); n != 2 {
+		t.Fatalf("filter shows %d rows, want 2", n)
+	}
+	first := m.cursorIndex()
+	m, _ = keys(t, m, "down", "down")
+	if m.cursorIndex() != first {
+		t.Errorf("two moves over 2 rows: cursor = %d, want %d", m.cursorIndex(), first)
 	}
 }
 

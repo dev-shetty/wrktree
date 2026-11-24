@@ -315,9 +315,9 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.busyKey(msg)
 	}
 	switch msg.String() {
-	case "up", "k":
+	case "up", "left", "k":
 		m.move(-1)
-	case "down", "j":
+	case "down", "right", "j":
 		m.move(1)
 	case "enter":
 		return m.choose(false)
@@ -433,7 +433,8 @@ func (m *Model) move(delta int) {
 	if i < 0 {
 		return
 	}
-	i = min(max(i+delta, 0), len(vis)-1)
+	// The cursor wraps: up from the first row goes to the last row.
+	i = ((i+delta)%len(vis) + len(vis)) % len(vis)
 	m.cursor = vis[i].WT.Path
 }
 

@@ -82,7 +82,7 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 
 | Key | Action |
 |---|---|
-| `↑` `↓` `j` `k` | Move the cursor. |
+| `↑` `↓` `←` `→` `j` `k` | Move the cursor. `←` moves up and `→` moves down. From the first row, a move up goes to the last row. |
 | `enter` | Change to the worktree and quit. |
 | `o` | Quit, then run the open command on the worktree. |
 | `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. |
