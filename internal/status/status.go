@@ -213,7 +213,7 @@ func Table(w io.Writer, rows []Row, base string, now time.Time) {
 	if distHead == "" {
 		distHead = "BASE"
 	}
-	cells := [][]string{{" ", "BRANCH", "CHANGES", distHead, "LAST COMMIT", "SIZE"}}
+	cells := [][]string{{" ", "BRANCH", "CHANGES", distHead, "SIZE", "LAST COMMIT"}}
 	for _, r := range rows {
 		mark, dist, age := " ", unavailable, unavailable
 		if r.Current {
@@ -225,7 +225,7 @@ func Table(w io.Writer, rows []Row, base string, now time.Time) {
 		if r.CommitOK {
 			age = Age(r.LastCommit, now)
 		}
-		cells = append(cells, []string{mark, name(r), changedText(r), dist, age, sizeText(r)})
+		cells = append(cells, []string{mark, name(r), changedText(r), dist, sizeText(r), age})
 	}
 	widths := make([]int, len(cells[0]))
 	for _, row := range cells {

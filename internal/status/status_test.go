@@ -185,6 +185,9 @@ func TestTable(t *testing.T) {
 		t.Errorf("no singular form:\n%s", out)
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if s, c := strings.Index(lines[0], "SIZE"), strings.Index(lines[0], "LAST COMMIT"); s < 0 || c < 0 || s > c {
+		t.Errorf("header order: want SIZE before LAST COMMIT: %q", lines[0])
+	}
 	if len(lines) != 5 {
 		t.Fatalf("want 5 lines, got %d:\n%s", len(lines), out)
 	}
