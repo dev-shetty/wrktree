@@ -1,2 +1,9 @@
 /wrktree
 /dist
+
+# Notes and plans of AI coding tools. They stay on the local disk.
+/docs/superpowers/
+/.superpowers/
+
+# macOS
+.DS_Store
