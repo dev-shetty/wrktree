@@ -144,7 +144,8 @@ Keys:
 | `f` | Run `git fetch origin`, then calculate the distances again. |
 | `/` | Filter the rows by text. |
 | `r` | Read all values again. |
-| `q` `esc` `ctrl+c` | Quit. |
+| `q` `esc` | Quit. While a delete runs, these keys do not quit. |
+| `ctrl+c` | Quit at once, also while a delete runs. |
 
 The key help wraps onto more lines at the ` · ` separators when it does not
 fit the terminal width. The table shows fewer rows for each extra line.
@@ -154,7 +155,7 @@ fit the terminal width. The table shows fewer rows for each extra line.
 stdin with no trailing newline. The copy runs outside the event loop. The
 footer shows `copied <text>`, or `cannot copy: <error>`. If no tool exists,
 the error is `no clipboard tool found (pbcopy, wl-copy, xclip, xsel)`. `c` does
-nothing while a delete or prune step runs.
+nothing while a prune step runs.
 
 ### Bare repositories
 
@@ -333,6 +334,37 @@ configuration file.
   started the delete and the worktree has a branch, the next line is
   `The branch <name> is deleted too.` Then come `Type yes to delete:` and the
   hint `type yes + enter · esc cancel`. Only `yes` and `enter` delete.
+- In the screen, a delete runs in the background. The user decided this on
+  2026-11-24: a delete of a large worktree froze the screen for many seconds.
+  Each row that `d` or `D` started has a job, by path. The job is `checking`
+  while the plan is read, then `deleting` while `git worktree remove` runs.
+  Several deletes can run at the same time. Each one is its own command.
+- A row with a job is dim. After its label and marks, it shows a spinner and
+  the word of the job, for example `| deleting`. The spinner cycles through
+  `|`, `/`, `-`, and `\` every 120 ms. A `tea.Tick` drives it, and the tick
+  runs only while a row has a job. The spinner and the word are yellow. The
+  cursor row keeps the cursor style. When the name is cut for the width, the
+  job text stays, as the marks do.
+- While rows have jobs, the list keeps all keys: moves, `/`, `c`, `f`, `r`, and
+  `d` or `D` on other rows. On a row with a job, `enter`, `o`, `d`, and `D` do
+  nothing and the footer shows `delete in progress`. `p` does nothing while a
+  row has a job. A prune that runs still blocks the other keys.
+- The plan is for the row of the `d` key, wherever the cursor is now. A clean
+  plan starts the delete at once. A plan that needs `yes` moves the cursor to
+  its row and opens the typed prompt, but only in the list. If the filter
+  input or a different prompt is open, the delete is cancelled. A plan error,
+  a blocked plan, a refused current worktree, or a row that a reload removed
+  ends the job, and nothing is deleted.
+- A reload keeps the jobs of the rows that stay. A row that is gone loses its
+  job.
+- Quit rule: while a delete runs, `q`, `esc`, `enter`, and `o` do not quit.
+  The footer shows `N delete in progress: wait, or press ctrl+c` (`N deletes`
+  for more than one). `ctrl+c` quits at once. If the shell is in a worktree
+  that is deleted, `ctrl+c` switches the shell to the main worktree. While only
+  plans run, the quit keys quit as usual.
+- After the delete of the current worktree, the screen switches the shell to
+  the main worktree and quits. If other deletes still run, it quits when the
+  last one is done.
 - `git worktree remove` also deletes ignored files, for example `.env.local`.
   The tool cannot tell these apart from `node_modules`. Thus each delete
   prompt says that ignored files are deleted too. (Builder call.)

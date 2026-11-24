@@ -39,6 +39,8 @@ var renderer = lipgloss.NewRenderer(os.Stderr)
 var (
 	dim   = renderer.NewStyle().Faint(true)
 	green = renderer.NewStyle().Foreground(lipgloss.Color("2"))
+	// yellow draws the spinner and the word of a row with a job.
+	yellow = renderer.NewStyle().Foreground(lipgloss.Color("3"))
 	// selected draws the whole cursor row in one style.
 	selected = renderer.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 )
@@ -276,7 +278,7 @@ func (m Model) table(w, extra int) []string {
 		for j, c := range all[i] {
 			widths[j] = max(widths[j], lipgloss.Width(c.text))
 		}
-		branchWidth = max(branchWidth, lipgloss.Width(status.Name(r)))
+		branchWidth = max(branchWidth, lipgloss.Width(status.Name(r)+m.jobText(r.WT.Path)))
 	}
 	fixed := 3 // " " + mark + " "
 	for j := range heads {
@@ -290,7 +292,7 @@ func (m Model) table(w, extra int) []string {
 	for j, h := range heads {
 		headCells[j] = cell{text: h, dim: true}
 	}
-	lines := []string{"   " + joinRow(dim.Render(pad("BRANCH", branchWidth)), headCells, widths, show, true)}
+	lines := []string{"   " + joinRow(dim.Render(pad("BRANCH", branchWidth)), headCells, widths, show, true, false)}
 
 	cells := make(map[string][]cell, len(m.rows))
 	for i, r := range m.rows {
@@ -322,8 +324,10 @@ func (m Model) table(w, extra int) []string {
 			mark = currentMark
 		}
 		// The cursor row is one color: its cells have no style of their own.
+		// A row with a job is dim.
 		styled := i != cur
-		line := " " + mark + " " + joinRow(branchCell(r, branchWidth, styled), cells[r.WT.Path], widths, show, styled)
+		job := m.jobText(r.WT.Path)
+		line := " " + mark + " " + joinRow(branchCell(r, branchWidth, styled, job), cells[r.WT.Path], widths, show, styled, job != "")
 		if !styled {
 			line = selected.Render(line)
 		}
@@ -333,38 +337,55 @@ func (m Model) table(w, extra int) []string {
 }
 
 // branchCell draws the name in width columns. The folder note is dim and the
-// merged mark is green, and the no commits mark is dim. A name that does not
-// fit ends with "…". The cut removes the folder note first, then shortens the
-// branch and keeps the marks: " ✓ merged" or " no commits", "[locked]", and
-// "[missing]". If styled is false,
-// the cell has no styles.
-func branchCell(r status.Row, width int, styled bool) string {
+// merged mark is green, and the no commits mark is dim. job is the text of
+// the row job, for example " | deleting", or "". A row with a job is dim,
+// and its job text is yellow. A name that does not fit ends with "…". The
+// cut removes the folder note first, then shortens the branch and keeps the
+// marks and the job text: " ✓ merged" or " no commits", "[locked]",
+// "[missing]", and the job. If styled is false, the cell has no styles.
+func branchCell(r status.Row, width int, styled bool, job string) string {
 	plain, note, marks := status.Plain(r), status.FolderNote(r), status.Marks(r)
-	pw, mw := lipgloss.Width(plain), lipgloss.Width(marks)
-	full := status.Name(r)
+	tail := marks + job
+	pw, mw := lipgloss.Width(plain), lipgloss.Width(tail)
+	full := status.Name(r) + job
+	busy := job != ""
+	// name styles the name part.
+	name := func(s string) string {
+		if styled && busy && s != "" {
+			return dim.Render(s)
+		}
+		return s
+	}
+	end := tail
 	if styled {
-		marks = styleMarks(marks)
+		end = styleMarks(marks)
+		if busy && marks != "" {
+			end = dim.Render(marks)
+		}
+		if busy {
+			end += yellow.Render(job)
+		}
 	}
 	switch {
 	case lipgloss.Width(full) <= width:
-		s := plain
+		s := name(plain)
 		if note != "" && styled {
 			s += " " + dim.Render(note)
 		} else if note != "" {
 			s += " " + note
 		}
-		return s + marks + strings.Repeat(" ", width-lipgloss.Width(full))
+		return s + end + strings.Repeat(" ", width-lipgloss.Width(full))
 	case pw+mw <= width:
 		// Part of the folder note fits, if it has room for " (…".
-		tail := ""
+		fit := ""
 		if extra := width - pw - mw; note != "" && extra >= 3 {
-			tail = ellipsize(" "+note, extra)
+			fit = ellipsize(" "+note, extra)
 		}
-		return pad(plain+tail, width-mw) + marks
+		return name(pad(plain+fit, width-mw)) + end
 	case width-mw >= 2:
-		return pad(ellipsize(plain, width-mw), width-mw) + marks
+		return name(pad(ellipsize(plain, width-mw), width-mw)) + end
 	}
-	return pad(ellipsize(plain+status.Marks(r), width), width)
+	return name(pad(ellipsize(plain+tail, width), width))
 }
 
 // styleMarks draws the merged mark green and the no commits mark dim. The
@@ -380,8 +401,9 @@ func styleMarks(marks string) string {
 }
 
 // joinRow joins the branch cell and the shown cells with two spaces. The
-// last cell has no padding. If styled is false, no cell is dim.
-func joinRow(branch string, cs []cell, widths []int, show []bool, styled bool) string {
+// last cell has no padding. If faint is true, each cell is dim. If styled is
+// false, no cell is dim.
+func joinRow(branch string, cs []cell, widths []int, show []bool, styled, faint bool) string {
 	var b strings.Builder
 	b.WriteString(branch)
 	last := -1
@@ -396,7 +418,7 @@ func joinRow(branch string, cs []cell, widths []int, show []bool, styled bool) s
 		}
 		b.WriteString("  ")
 		text := c.text
-		if c.dim && styled {
+		if (c.dim || faint) && styled {
 			text = dim.Render(text)
 		}
 		b.WriteString(text)

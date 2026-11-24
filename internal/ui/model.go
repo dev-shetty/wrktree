@@ -48,15 +48,6 @@ const (
 	cancelledNote = "cancelled"
 )
 
-// deleteState is the delete that the prompt asks about, or that runs.
-type deleteState struct {
-	wt      git.Worktree
-	plan    git.DeletePlan
-	branch  bool   // also delete the branch: D started the delete and wt has a branch
-	current bool   // the shell is in this worktree
-	main    string // path of the main worktree, or ""
-}
-
 // Model is the state of the screen.
 type Model struct {
 	d Deps
@@ -82,12 +73,18 @@ type Model struct {
 	width, height int
 	result        Result
 
-	del        deleteState
-	planBranch bool     // D started the plan that runs: the delete also deletes the branch
-	typed      string   // text of the typed delete prompt
-	pruneLines []string // stale entries that the prune prompt shows
-	busy       string   // text of the delete or prune step that runs; "" = none
-	writing    bool     // the step that runs changes the repository
+	// jobs holds the delete job of each row that has one, by path. Change it
+	// only with setJob and dropJob: a copy of the Model keeps its own map.
+	jobs     map[string]job
+	spin     int    // frame of the spinner
+	spinning bool   // a tick command runs
+	after    Result // the result after the delete of the current worktree; quit when no delete runs
+
+	del        deleteState // the delete that the typed prompt asks about
+	typed      string      // text of the typed delete prompt
+	pruneLines []string    // stale entries that the prune prompt shows
+	busy       string      // text of the prune step that runs; "" = none
+	writing    bool        // the step that runs changes the repository
 }
 
 // New returns a screen that loads its rows when it starts.
@@ -134,6 +131,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.planDone(msg)
 	case removedMsg:
 		return m.removed(msg)
+	case tickMsg:
+		return m.spun()
 	case pruneListMsg:
 		return m.pruneListed(msg)
 	case prunedMsg:
@@ -255,6 +254,12 @@ func (m Model) setWorktrees(msg worktreesMsg) (tea.Model, tea.Cmd) {
 	if m.cursor == "" && cur >= 0 {
 		m.cursor = msg.wts[cur].Path
 	}
+	// A job lives as long as its row.
+	for p := range m.jobs {
+		if !containsPath(msg.wts, p) {
+			m.dropJob(p)
+		}
+	}
 	m.d.Cache.Retain(m.d.Repo, paths)
 	_ = m.d.Cache.Save()
 	m.fixCursor()
@@ -340,15 +345,22 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.busy != "" {
 		return m.busyKey(msg)
 	}
-	switch msg.String() {
+	switch k := msg.String(); k {
 	case "up", "left", "k":
 		m.move(-1)
 	case "down", "right", "j":
 		m.move(1)
-	case "enter":
-		return m.choose(false)
-	case "o":
-		return m.choose(true)
+	case "enter", "o":
+		// A quit during a delete can leave the shell in a deleted directory.
+		if n := m.deletes(); n > 0 {
+			m.note = waitNote(n)
+			return m, nil
+		}
+		if _, ok := m.jobs[m.cursorPath()]; ok {
+			m.note = inProgressNote
+			return m, nil
+		}
+		return m.choose(k == "o")
 	case "c":
 		if i := m.cursorIndex(); i >= 0 {
 			return m, copyCmd(m.d.Copy, wtLabel(m.visible()[i].WT))
@@ -366,12 +378,22 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "D":
 		return m.startDelete(true)
 	case "p":
+		if len(m.jobs) > 0 {
+			m.note = inProgressNote
+			return m, nil
+		}
 		m.busy = "reading stale entries"
 		return m, pruneListCmd(m.d.Git)
 	case "/":
 		m.mode = modeFilter
-	case "q", "esc", "ctrl+c":
+	case "q", "esc":
+		if n := m.deletes(); n > 0 {
+			m.note = waitNote(n)
+			return m, nil
+		}
 		return m, tea.Quit
+	case "ctrl+c":
+		return m.quitNow()
 	}
 	return m, nil
 }
@@ -379,7 +401,7 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) filterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		return m, tea.Quit
+		return m.quitNow()
 	case tea.KeyEsc:
 		m.filter, m.mode = "", modeList
 	case tea.KeyEnter:
@@ -468,18 +490,13 @@ func (m *Model) move(delta int) {
 	m.cursor = vis[i].WT.Path
 }
 
-// busyKey handles a key while a delete or prune step runs. No key can
-// change the mode or move the cursor. ctrl+c quits. q and esc quit only
-// while the step reads: a quit during a delete can leave the shell in a
-// deleted directory. Thus ctrl+c during the delete of the current worktree
-// changes to the main worktree.
+// busyKey handles a key while a prune step runs. No key can change the mode
+// or move the cursor. ctrl+c quits. q and esc quit only while the step
+// reads, not while it prunes.
 func (m Model) busyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		if m.writing && m.del.current && m.del.main != "" {
-			m.result = Result{SwitchPath: m.del.main}
-		}
-		return m, tea.Quit
+		return m.quitNow()
 	case "q", "esc":
 		if !m.writing {
 			return m, tea.Quit
@@ -504,170 +521,6 @@ func (m Model) mainPath() string {
 		}
 	}
 	return ""
-}
-
-// startDelete reads the delete plan of the cursor row. If branch is true
-// (the D key), the delete also deletes the branch. Only one delete or prune
-// step runs at one time.
-func (m Model) startDelete(branch bool) (tea.Model, tea.Cmd) {
-	i := m.cursorIndex()
-	if m.busy != "" || i < 0 {
-		return m, nil
-	}
-	w := m.visible()[i].WT
-	m.busy = "checking " + w.Path
-	m.planBranch = branch
-	return m, planCmd(m.d.Git, w)
-}
-
-// planDone starts the delete of a clean worktree, or opens the typed prompt
-// for a worktree with changes or unreachable commits. A plan error, a
-// blocked plan, or the current worktree without a safe directory to change
-// to deletes nothing.
-func (m Model) planDone(msg planMsg) (tea.Model, tea.Cmd) {
-	m.busy = ""
-	branch := m.planBranch
-	m.planBranch = false
-	switch {
-	case msg.err != nil:
-		m.note = "cannot check " + msg.wt.Path + ": " + msg.err.Error()
-		return m, nil
-	case msg.plan.Blocked != "":
-		m.note = msg.plan.Blocked
-		return m, nil
-	}
-	// Use the plan only for the row that the user sees and selected.
-	if m.mode != modeList || m.cursorPath() != msg.wt.Path {
-		m.note = cancelledNote
-		return m, nil
-	}
-	main := m.mainPath()
-	// The shell is in the worktree if the directory is in its folder.
-	current := git.Contains(msg.wt.Path, m.d.Cwd)
-	if current && (!m.d.CanCD || main == "") {
-		m.note = currentNote
-		return m, nil
-	}
-	m.del = deleteState{
-		wt: msg.wt, plan: msg.plan, current: current, main: main,
-		branch: branch && msg.wt.Branch != "",
-	}
-	m.typed = ""
-	if msg.plan.NeedsYes {
-		m.mode = modeTyped
-		return m, nil
-	}
-	// A clean plan deletes at once. The delete does not force, so git
-	// refuses it if files changed after the plan.
-	return m.runDelete()
-}
-
-// typedKey handles the typed prompt: only the exact text "yes" and enter
-// delete. Any other text and enter, or esc, cancels.
-func (m Model) typedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyCtrlC:
-		return m, tea.Quit
-	case tea.KeyEsc:
-		return m.cancel()
-	case tea.KeyEnter:
-		if m.typed == "yes" {
-			return m.runDelete()
-		}
-		return m.cancel()
-	case tea.KeyBackspace:
-		if r := []rune(m.typed); len(r) > 0 {
-			m.typed = string(r[:len(r)-1])
-		}
-	case tea.KeySpace:
-		m.typed += " "
-	case tea.KeyRunes:
-		m.typed += string(msg.Runes)
-	}
-	return m, nil
-}
-
-func (m Model) cancel() (tea.Model, tea.Cmd) {
-	m.mode, m.typed, m.pruneLines = modeList, "", nil
-	m.del = deleteState{}
-	m.note = cancelledNote
-	return m, nil
-}
-
-// runDelete starts the delete of m.del. Only a plan that needs a typed yes
-// forces the delete. The git commands run in the main
-// worktree, because the current worktree can be the one that goes.
-func (m Model) runDelete() (tea.Model, tea.Cmd) {
-	m.mode, m.typed = modeList, ""
-	if m.busy != "" {
-		return m, nil
-	}
-	r := m.d.Git
-	if m.del.main != "" {
-		r = r.In(m.del.main)
-	}
-	m.busy, m.writing = "deleting "+m.del.wt.Path, true
-	return m, removeCmd(r, m.del.wt, m.del.plan.NeedsYes, m.del.branch)
-}
-
-// removed removes the row of a deleted worktree and its cache entry. After
-// the delete of the current worktree, the shell changes to the main worktree.
-func (m Model) removed(msg removedMsg) (tea.Model, tea.Cmd) {
-	del := m.del
-	m.busy, m.writing, m.del = "", false, deleteState{}
-	if msg.err != nil {
-		m.note = "delete failed: " + msg.err.Error()
-		return m, nil
-	}
-	rows := make([]status.Row, 0, len(m.rows))
-	for _, r := range m.rows {
-		if r.WT.Path != msg.path {
-			rows = append(rows, r)
-		}
-	}
-	m.rows = rows
-	var wait []string
-	for _, p := range m.sizeWait {
-		if p != msg.path {
-			wait = append(wait, p)
-		}
-	}
-	m.sizeWait = wait
-	m.d.Cache.Delete(m.d.Repo, msg.path)
-	_ = m.d.Cache.Save()
-	m.fixCursor()
-
-	name := msg.path
-	if del.wt.Path == msg.path {
-		name = wtLabel(del.wt)
-	}
-	m.note = "deleted " + name
-	switch {
-	case msg.branchErr != nil:
-		m.note += ", but the branch stays: " + msg.branchErr.Error()
-	case del.branch && del.wt.Path == msg.path:
-		m.note += " and its branch"
-	}
-	if del.current && del.wt.Path == msg.path {
-		m.result = Result{SwitchPath: del.main}
-		if msg.branchErr != nil {
-			m.result.Message = m.note
-		}
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-// wtLabel returns the branch of w, or the first 7 characters of its head if
-// it is detached.
-func wtLabel(w git.Worktree) string {
-	if w.Branch != "" {
-		return w.Branch
-	}
-	if len(w.Head) > 7 {
-		return w.Head[:7]
-	}
-	return w.Head
 }
 
 func (m Model) pruneListed(msg pruneListMsg) (tea.Model, tea.Cmd) {
@@ -698,7 +551,7 @@ func (m Model) pruneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.busy, m.writing = "pruning", true
 		return m, pruneCmd(m.d.Git, n)
 	case "ctrl+c":
-		return m, tea.Quit
+		return m.quitNow()
 	}
 	return m.cancel()
 }

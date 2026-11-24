@@ -85,16 +85,17 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 | Key | Action |
 |---|---|
 | `↑` `↓` `←` `→` `j` `k` | Move the cursor. `←` moves up and `→` moves down. From the first row, a move up goes to the last row. |
-| `enter` | Change to the worktree and quit. |
-| `o` | Quit, then run the open command on the worktree. |
+| `enter` | Change to the worktree and quit. While a delete runs, `enter` does not quit. |
+| `o` | Quit, then run the open command on the worktree. While a delete runs, `o` does not quit. |
 | `c` | Copy the branch name to the system clipboard. For a detached worktree, copy the 7-character commit hash. |
-| `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. |
+| `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. The delete runs in the background. |
 | `D` | Delete the worktree, then delete its branch with `git branch -d`. |
 | `p` | Show the stale worktree entries, then prune them after a prompt. |
 | `f` | Fetch the base branch again, then calculate the distances again. |
 | `/` | Filter the rows by branch name or folder name. |
 | `r` | Read all values again, and measure all disk sizes again. |
-| `q` `esc` `ctrl+c` | Quit. |
+| `q` `esc` | Quit. While a delete runs, these keys do not quit. |
+| `ctrl+c` | Quit at once, also while a delete runs. |
 
 If the key help does not fit the terminal width, it wraps onto more lines at the ` · ` separators. The table then shows fewer rows.
 
@@ -176,10 +177,21 @@ These rules apply to `d` and `D` in the screen and to `wrktree rm`:
 
 In the screen:
 
-- `d` and `D` first check the worktree. While the check runs, the screen ignores all keys except the quit keys.
-- If the worktree is clean, the delete starts immediately. There is no prompt. The delete does not use `--force`, so git refuses it if files changed after the check.
-- If the worktree needs the typed word `yes`, a prompt opens. Type `yes` and press `enter` to delete. Any other text cancels. `esc` cancels.
+- `d` and `D` first check the worktree. Then the delete runs. The check and the delete run in the background. The screen stays live.
+- The row shows a spinner and its step: `checking` or `deleting`. The row is dim until the step is done. On a color terminal, the spinner and the step are yellow.
+- While a row has a step, you can move the cursor, filter, copy, fetch, and read the values again. You can also delete other rows. Each delete runs its own `git worktree remove`.
+- On a row with a step, `enter`, `o`, `d`, and `D` do nothing. The footer shows `delete in progress`.
+- If the worktree is clean, the delete starts immediately. There is no prompt. The delete does not use `--force`, so git refuses it if files changed after the check. The check is for the row of the `d` key, also if the cursor moved.
+- If the worktree needs the typed word `yes`, the cursor goes back to its row and a prompt opens. Type `yes` and press `enter` to delete. Any other text cancels. `esc` cancels. If the filter input or a different prompt is open at that time, the delete is cancelled.
 - Each prompt says that ignored files are deleted too.
+- When the delete is done, the row goes away. If the delete fails, the row stays and the footer shows the git message.
+- `p` waits until no row has a step. The footer shows `delete in progress`.
+
+Quit while a delete runs:
+
+- `q`, `esc`, `enter`, and `o` do not quit while a delete runs. The footer shows `1 delete in progress: wait, or press ctrl+c`.
+- `ctrl+c` quits at once. The screen does not wait for the delete, and it does not show the result.
+- While only a check runs, the quit keys quit as usual.
 
 The branch stays by default.
 
@@ -192,7 +204,7 @@ The branch stays by default.
 The current worktree:
 
 - `wrktree rm` does not delete a worktree whose folder holds the current directory. This rule also applies in a nested worktree inside that folder.
-- The screen can delete it. After the delete, the shell changes to the main worktree. If you press `ctrl+c` while the delete runs, the shell also changes to the main worktree.
+- The screen can delete it. After the delete, the shell changes to the main worktree and the screen quits. If other deletes still run, the screen quits when the last one is done. If you press `ctrl+c` while the delete runs, the shell also changes to the main worktree.
 - If the `wt` function is not in use, or the repository has no main worktree, the screen refuses this delete.
 
 `wrktree rm --force` deletes without a prompt. Without a terminal and without `--force`, `wrktree rm` stops with an error on a worktree with changed files.

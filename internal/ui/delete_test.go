@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/dev-shetty/wrktree/internal/disk"
 	"github.com/dev-shetty/wrktree/internal/git"
@@ -86,11 +87,19 @@ func press(t *testing.T, m Model, path, k string) (Model, tea.Cmd) {
 	if cmd == nil {
 		t.Fatalf("%s starts no command", k)
 	}
-	msg, ok := cmd().(planMsg)
-	if !ok {
-		t.Fatalf("%s command returns %T, want planMsg", k, msg)
+	return send(t, m, planOf(t, cmd))
+}
+
+// planOf runs cmd and returns its plan message. It does not run the spinner tick.
+func planOf(t *testing.T, cmd tea.Cmd) planMsg {
+	t.Helper()
+	for _, msg := range msgs(cmd) {
+		if p, ok := msg.(planMsg); ok {
+			return p
+		}
 	}
-	return send(t, m, msg)
+	t.Fatal("the command returns no planMsg")
+	return planMsg{}
 }
 
 // run runs cmd and returns its message.
@@ -134,6 +143,9 @@ func TestDeleteBlockedMain(t *testing.T) {
 		if inPrompt(m) {
 			t.Error("blocked plan opens a prompt")
 		}
+		if len(m.jobs) != 0 {
+			t.Errorf("%s: a blocked plan leaves a job: %v", k, m.jobs)
+		}
 		if _, cmd = keys(t, m, "y"); cmd != nil {
 			t.Error("y after a blocked plan starts a command")
 		}
@@ -160,8 +172,8 @@ func TestDeleteBlockedLocked(t *testing.T) {
 	m, _ := repoModel(t, repo, repo.Dir, true)
 	for _, k := range []string{"d", "D"} {
 		m2, cmd := press(t, m, feat, k)
-		if cmd != nil || !strings.Contains(m2.View(), "worktree is locked: in use") || inPrompt(m2) {
-			t.Errorf("%s on a locked worktree: cmd %v\n%s", k, cmd != nil, m2.View())
+		if cmd != nil || !strings.Contains(m2.View(), "worktree is locked: in use") || inPrompt(m2) || len(m2.jobs) != 0 {
+			t.Errorf("%s on a locked worktree: cmd %v, jobs %v\n%s", k, cmd != nil, m2.jobs, m2.View())
 		}
 	}
 	if !exists(feat) || !hasBranch(t, repo, "feat-a") {
@@ -182,6 +194,9 @@ func TestDeletePlanError(t *testing.T) {
 	}
 	if inPrompt(m) {
 		t.Error("a plan error opens a prompt")
+	}
+	if len(m.jobs) != 0 {
+		t.Errorf("a plan error leaves a job: %v", m.jobs)
 	}
 	if _, cmd := keys(t, m, "y"); cmd != nil {
 		t.Error("y after a plan error starts a command")
@@ -211,10 +226,13 @@ func TestDeleteCleanStartsAtOnce(t *testing.T) {
 		t.Fatalf("a clean plan opens a prompt:\n%s", m.View())
 	}
 	noOldPrompt(t, m.View())
-	if !strings.Contains(m.View(), "deleting "+featA) {
-		t.Errorf("no deleting text:\n%s", m.View())
+	if l := lineWith(t, m.View(), "feat-a"); !strings.Contains(l, "deleting") {
+		t.Errorf("the row does not show deleting: %q", l)
 	}
-	// A second delete cannot start while the first one runs.
+	if strings.Contains(m.View(), "deleting "+featA) {
+		t.Errorf("the footer shows the old deleting text:\n%s", m.View())
+	}
+	// A second delete of the same row cannot start. p waits for the delete.
 	for _, k := range []string{"d", "D", "p", "y"} {
 		if _, c := keys(t, m, k); c != nil {
 			t.Errorf("%s while a delete runs starts a command", k)
@@ -332,6 +350,12 @@ func TestDeleteCleanPlanNeverForces(t *testing.T) {
 	if !strings.Contains(m.View(), "delete failed") {
 		t.Errorf("no failure text:\n%s", m.View())
 	}
+	if _, ok := m.jobs[feat]; ok {
+		t.Error("the row keeps its job after a failed delete")
+	}
+	if l := lineWith(t, m.View(), "feat-a"); strings.Contains(l, "deleting") {
+		t.Errorf("the row still shows deleting: %q", l)
+	}
 }
 
 func TestDeleteDirtyNeedsTypedYes(t *testing.T) {
@@ -392,6 +416,16 @@ func TestDeleteDirtyNeedsTypedYes(t *testing.T) {
 	}
 	noOldPrompt(t, m.View())
 	m, cmd = keys(t, m, "enter")
+	// The delete runs in the background: the list is back and keys work.
+	if m.mode != modeList || m.jobs[feat].state != jobDeleting {
+		t.Fatalf("after yes: mode %v, job %+v", m.mode, m.jobs[feat])
+	}
+	if l := lineWith(t, m.View(), "feat-a"); !strings.Contains(l, "deleting") {
+		t.Errorf("the row does not show deleting: %q", l)
+	}
+	if moved, _ := keys(t, m, "j"); moved.cursor == m.cursor {
+		t.Error("j does not move the cursor while the delete runs")
+	}
 	msg, ok := run(t, cmd).(removedMsg)
 	// git refuses a worktree with changes unless the command forces it.
 	if !ok || msg.err != nil || exists(feat) {
@@ -465,8 +499,8 @@ func TestDeleteDetachedD(t *testing.T) {
 	}
 
 	m2, cmd = send(t, m, planMsg{wt: w})
-	if cmd == nil || m2.del.branch {
-		t.Errorf("clean detached D: cmd %v, branch %v", cmd != nil, m2.del.branch)
+	if cmd == nil || m2.jobs[flowsPath].branch {
+		t.Errorf("clean detached D: cmd %v, branch %v", cmd != nil, m2.jobs[flowsPath].branch)
 	}
 }
 
@@ -524,8 +558,8 @@ func TestDeleteCurrentWithoutCD(t *testing.T) {
 			if cmd != nil {
 				t.Errorf("%s: the plan starts a command", tc.name)
 			}
-			if v := m.View(); !strings.Contains(v, refusal) || inPrompt(m) {
-				t.Errorf("%s:\n%s", tc.name, v)
+			if v := m.View(); !strings.Contains(v, refusal) || inPrompt(m) || len(m.jobs) != 0 {
+				t.Errorf("%s: jobs %v\n%s", tc.name, m.jobs, v)
 			}
 			if _, cmd := keys(t, m, "y"); cmd != nil {
 				t.Errorf("%s: y starts a command", tc.name)
@@ -627,37 +661,40 @@ func TestPruneConfirm(t *testing.T) {
 	}
 }
 
-// TestKeysWaitForPlan: between d and the plan, no key can change the mode,
-// move the cursor, or change the branch choice. A key typed early never
-// answers a prompt.
-func TestKeysWaitForPlan(t *testing.T) {
-	early := []string{"/", "y", "e", "s", "enter", "o", "f", "r", "p", "d", "D", "b", "j", "k", "up", "down"}
-	m := loaded(t)
+// TestKeysLiveWhilePlanRuns: between d and the plan, the cursor moves, and
+// the row of the plan refuses enter, o, d, and D. A key typed early never
+// answers the typed prompt. D on another row does not change the branch
+// choice of the plan.
+func TestKeysLiveWhilePlanRuns(t *testing.T) {
+	m := loaded(t) // rows: main, flows, alert
 	m.cursor = flowsPath
 	m, _ = keys(t, m, "d")
-	for _, k := range early {
-		var cmd tea.Cmd
-		m, cmd = keys(t, m, k)
-		if cmd != nil {
-			t.Errorf("%s while a plan runs starts a command", k)
+	if j, ok := m.jobs[flowsPath]; !ok || j.state != jobChecking || j.branch {
+		t.Fatalf("job = %+v, %v; want checking, no branch", j, ok)
+	}
+	for _, k := range []string{"enter", "o", "d", "D"} {
+		m2, cmd := keys(t, m, k)
+		if cmd != nil || m2.note != inProgressNote || m2.Result() != (Result{}) {
+			t.Errorf("%s on the row of the plan: cmd %v, note %q", k, cmd != nil, m2.note)
 		}
 	}
-	m, _ = send(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	if m.mode != modeList || m.filter != "" || m.cursor != flowsPath || m.Result() != (Result{}) {
-		t.Fatalf("keys changed the state: mode %v, filter %q, cursor %s", m.mode, m.filter, m.cursor)
+	for _, k := range []string{"j", "k", "down", "up", "right", "left"} {
+		if m2, _ := keys(t, m, k); m2.cursor == flowsPath {
+			t.Errorf("%s does not move the cursor while a plan runs", k)
+		}
 	}
-	m2, cmd := send(t, m, planMsg{wt: m.row(flowsPath).WT})
-	if cmd == nil || inPrompt(m2) {
-		t.Fatalf("clean plan does not start the delete:\n%s", m2.View())
-	}
-	if m2.del.branch {
-		t.Error("D typed while the plan runs selects the branch")
+	m, _ = keys(t, m, "y", "e", "s", "j", "D") // D on the alert row
+	if !m.jobs[alertPath].branch || m.jobs[flowsPath].branch {
+		t.Fatalf("jobs = %+v", m.jobs)
 	}
 
 	// The typed prompt starts empty: early keys are not in the answer.
-	m2, cmd = send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: git.DeletePlan{Changed: 2, NeedsYes: true}})
+	m2, cmd := send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: git.DeletePlan{Changed: 2, NeedsYes: true}})
 	if cmd != nil || !inPrompt(m2) || m2.typed != "" || m2.del.branch {
 		t.Fatalf("typed prompt after early keys: cmd %v, typed %q, branch %v", cmd != nil, m2.typed, m2.del.branch)
+	}
+	if m2.cursor != flowsPath {
+		t.Errorf("cursor on %s, want the row of the prompt", m2.cursor)
 	}
 	if _, cmd = keys(t, m2, "enter"); cmd != nil {
 		t.Error("enter alone deletes")
@@ -681,16 +718,18 @@ func TestQuitWhilePlanRuns(t *testing.T) {
 	}
 }
 
-func TestPlanForOtherRowCancels(t *testing.T) {
+// TestPlanWithoutJobCancels: a plan for a row that has no job (no d started
+// it, or a reload removed the job) deletes nothing.
+func TestPlanWithoutJobCancels(t *testing.T) {
 	for _, plan := range []git.DeletePlan{{}, {Changed: 1, NeedsYes: true}} {
 		m := loaded(t)
 		m.cursor = flowsPath
 		m, cmd := send(t, m, planMsg{wt: m.row(alertPath).WT, plan: plan})
 		if cmd != nil {
-			t.Error("plan for another row starts a command")
+			t.Error("a plan without a job starts a command")
 		}
-		if inPrompt(m) || m.mode != modeList || !strings.Contains(m.View(), "cancelled") {
-			t.Errorf("plan for another row opens a prompt:\n%s", m.View())
+		if inPrompt(m) || m.mode != modeList || m.note != cancelledNote || len(m.jobs) != 0 {
+			t.Errorf("a plan without a job: jobs %v\n%s", m.jobs, m.View())
 		}
 		if _, cmd := keys(t, m, "y"); cmd != nil {
 			t.Error("y starts a command")
@@ -698,22 +737,63 @@ func TestPlanForOtherRowCancels(t *testing.T) {
 	}
 }
 
-func TestPlanInFilterModeCancels(t *testing.T) {
-	for _, plan := range []git.DeletePlan{{}, {Changed: 1, NeedsYes: true}} {
-		m := loaded(t)
-		m.cursor = flowsPath
-		m.mode = modeFilter
-		m, cmd := send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: plan})
-		if cmd != nil {
-			t.Error("plan in filter mode starts a command")
-		}
-		if m.mode != modeFilter || inPrompt(m) {
-			t.Fatalf("plan in filter mode opens a prompt:\n%s", m.View())
-		}
-		m, cmd = keys(t, m, "y", "e", "s", "enter")
-		if cmd != nil || m.Result() != (Result{}) {
-			t.Error("filter keys start a command")
-		}
+// TestPlanAfterCursorMovedOpensPrompt: a plan that needs yes moves the
+// cursor back to its row and opens the prompt for that row.
+func TestPlanAfterCursorMovedOpensPrompt(t *testing.T) {
+	m := loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "D", "k") // the cursor goes to main
+	if m.cursor != mainPath {
+		t.Fatalf("cursor on %s", m.cursor)
+	}
+	m, cmd := send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: git.DeletePlan{Changed: 2, NeedsYes: true}})
+	if cmd != nil || m.mode != modeTyped || m.cursor != flowsPath || m.del.wt.Path != flowsPath || !m.del.branch {
+		t.Fatalf("cmd %v, mode %v, cursor %s, del %+v", cmd != nil, m.mode, m.cursor, m.del)
+	}
+	if v := m.View(); !strings.Contains(v, "eng-6458-bugsink-key-flows has 2 changed files.") {
+		t.Errorf("the prompt is not for the row of the plan:\n%s", v)
+	}
+	// A hidden row: the filter clears so that the cursor can show it.
+	m = loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d", "/", "m", "o", "n", "o", "enter")
+	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: git.DeletePlan{Changed: 2, NeedsYes: true}})
+	if m.mode != modeTyped || m.cursorPath() != flowsPath {
+		t.Errorf("hidden row: mode %v, cursor %s", m.mode, m.cursorPath())
+	}
+}
+
+// TestPlanWhileFilterOpen: while the filter input or another typed prompt is
+// open, a plan that needs yes cancels. A clean plan deletes.
+func TestPlanWhileFilterOpen(t *testing.T) {
+	m := loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d", "/")
+	m2, cmd := send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: git.DeletePlan{Changed: 1, NeedsYes: true}})
+	if cmd != nil || m2.mode != modeFilter || inPrompt(m2) || m2.note != cancelledNote || len(m2.jobs) != 0 {
+		t.Fatalf("plan with yes in filter mode: cmd %v, mode %v, note %q, jobs %v", cmd != nil, m2.mode, m2.note, m2.jobs)
+	}
+	m2, cmd = keys(t, m2, "y", "e", "s", "enter")
+	if cmd != nil || m2.Result() != (Result{}) {
+		t.Error("filter keys start a command")
+	}
+
+	m2, cmd = send(t, m, planMsg{wt: m.row(flowsPath).WT})
+	if cmd == nil || m2.mode != modeFilter || m2.jobs[flowsPath].state != jobDeleting {
+		t.Errorf("clean plan in filter mode: cmd %v, mode %v, jobs %v", cmd != nil, m2.mode, m2.jobs)
+	}
+
+	// Another typed prompt is open.
+	m = loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d", "j", "d")
+	m, _ = send(t, m, planMsg{wt: m.row(alertPath).WT, plan: git.DeletePlan{Changed: 1, NeedsYes: true}})
+	m2, cmd = send(t, m, planMsg{wt: m.row(flowsPath).WT, plan: git.DeletePlan{Changed: 1, NeedsYes: true}})
+	if cmd != nil || m2.del.wt.Path != alertPath || m2.note != cancelledNote {
+		t.Errorf("second prompt: cmd %v, prompt for %s, note %q", cmd != nil, m2.del.wt.Path, m2.note)
+	}
+	if _, ok := m2.jobs[flowsPath]; ok {
+		t.Error("the cancelled plan keeps its job")
 	}
 }
 
@@ -743,25 +823,206 @@ func TestPruneKeysWaitForList(t *testing.T) {
 	}
 }
 
-func TestQuitBlockedWhileDeleteRuns(t *testing.T) {
+// deleting returns loaded(t) with a clean delete that runs for each path.
+// The cursor is on the main row.
+func deleting(t *testing.T, paths ...string) Model {
+	t.Helper()
 	m := loaded(t)
-	m.cursor = flowsPath
-	m, _ = keys(t, m, "d")
-	m, cmd := send(t, m, planMsg{wt: m.row(flowsPath).WT})
-	if cmd == nil {
-		t.Fatal("clean plan starts no delete")
-	}
-	for _, k := range []string{"q", "esc", "r", "enter", "y", "d", "D"} {
-		if _, cmd := keys(t, m, k); cmd != nil {
-			t.Errorf("%s while a delete runs returns a command", k)
+	for _, p := range paths {
+		m.cursor = p
+		m, _ = keys(t, m, "d")
+		var cmd tea.Cmd
+		m, cmd = send(t, m, planMsg{wt: m.row(p).WT})
+		if cmd == nil || m.jobs[p].state != jobDeleting {
+			t.Fatalf("%s: clean plan starts no delete", p)
 		}
 	}
-	if _, cmd := keys(t, m, "ctrl+c"); !isQuit(cmd) {
-		t.Error("ctrl+c while a delete runs does not quit")
+	m.cursor = mainPath
+	return m
+}
+
+// TestQuitKeysWhileDeleteRuns: q, esc, enter, and o do not quit while a
+// delete runs. ctrl+c quits. A plan alone does not stop a quit.
+func TestQuitKeysWhileDeleteRuns(t *testing.T) {
+	for _, tc := range []struct {
+		paths []string
+		note  string
+	}{
+		{[]string{flowsPath}, "1 delete in progress: wait, or press ctrl+c"},
+		{[]string{flowsPath, alertPath}, "2 deletes in progress: wait, or press ctrl+c"},
+	} {
+		m := deleting(t, tc.paths...)
+		for _, k := range []string{"q", "esc", "enter", "o"} {
+			m2, cmd := keys(t, m, k)
+			if cmd != nil || m2.Result() != (Result{}) || m2.note != tc.note {
+				t.Errorf("%d deletes, %s: cmd %v, Result %+v, note %q", len(tc.paths), k, cmd != nil, m2.Result(), m2.note)
+			}
+		}
+		if _, cmd := keys(t, m, "ctrl+c"); !isQuit(cmd) {
+			t.Errorf("%d deletes: ctrl+c does not quit", len(tc.paths))
+		}
 	}
-	m, _ = send(t, m, removedMsg{path: flowsPath, err: errors.New("boom")})
-	if m.del != (deleteState{}) {
-		t.Errorf("del not reset after a failed delete: %+v", m.del)
+
+	m := loaded(t)
+	m.cursor = flowsPath
+	m, _ = keys(t, m, "d", "k")
+	if _, cmd := keys(t, m, "q"); !isQuit(cmd) {
+		t.Error("q while only a plan runs does not quit")
+	}
+	if m2, cmd := keys(t, m, "enter"); !isQuit(cmd) || m2.Result().SwitchPath != mainPath {
+		t.Error("enter on another row while only a plan runs does not switch")
+	}
+}
+
+// TestKeysLiveWhileDeleteRuns: while row A is deleted, the other rows work.
+func TestKeysLiveWhileDeleteRuns(t *testing.T) {
+	m := deleting(t, flowsPath)
+	var copied []string
+	m.d.Copy = func(s string) error { copied = append(copied, s); return nil }
+
+	m.cursor = flowsPath
+	for _, k := range []string{"enter", "o", "d", "D"} {
+		m2, cmd := keys(t, m, k)
+		if cmd != nil || m2.Result() != (Result{}) || !strings.Contains(m2.note, inProgressNote) {
+			t.Errorf("%s on the deleted row: cmd %v, note %q", k, cmd != nil, m2.note)
+		}
+	}
+	m, _ = keys(t, m, "j")
+	if m.cursor != alertPath {
+		t.Fatalf("j: cursor on %s", m.cursor)
+	}
+	m2, cmd := keys(t, m, "D")
+	if j := m2.jobs[alertPath]; j.state != jobChecking || !j.branch {
+		t.Errorf("D on another row: job %+v", j)
+	}
+	if p := planOf(t, cmd); p.wt.Path != alertPath {
+		t.Errorf("the second plan is for %s", p.wt.Path)
+	}
+	if m2.jobs[flowsPath].state != jobDeleting {
+		t.Error("the first delete lost its job")
+	}
+
+	m2, cmd = keys(t, m, "c")
+	if m2, _ = send(t, m2, run(t, cmd)); len(copied) != 1 || m2.note != "copied eng-6201-onboarding-v2-alerts" {
+		t.Errorf("c: copied %v, note %q", copied, m2.note)
+	}
+	if m2, _ = keys(t, m, "/", "6", "2"); m2.mode != modeFilter || m2.filter != "62" {
+		t.Errorf("/: mode %v, filter %q", m2.mode, m2.filter)
+	}
+	if _, cmd = keys(t, m, "f"); cmd == nil {
+		t.Error("f starts no fetch")
+	}
+	if _, cmd = keys(t, m, "r"); cmd == nil {
+		t.Error("r starts no reload")
+	}
+}
+
+// TestPruneWaitsForDelete: p does nothing while a row has a job.
+func TestPruneWaitsForDelete(t *testing.T) {
+	m := deleting(t, flowsPath)
+	m, cmd := keys(t, m, "p")
+	if cmd != nil || m.note != inProgressNote || m.busy != "" {
+		t.Errorf("p while a delete runs: cmd %v, note %q, busy %q", cmd != nil, m.note, m.busy)
+	}
+	m = loaded(t)
+	m, _ = keys(t, m, "d")
+	if _, cmd = keys(t, m, "p"); cmd != nil {
+		t.Error("p while a plan runs starts a command")
+	}
+	// While the prune list runs, d does nothing.
+	m = loaded(t)
+	m, _ = keys(t, m, "p")
+	if m2, cmd := keys(t, m, "d"); cmd != nil || len(m2.jobs) != 0 {
+		t.Error("d while a prune list runs starts a plan")
+	}
+}
+
+// TestReloadKeepsJobs: a reload keeps the job of each row that stays.
+func TestReloadKeepsJobs(t *testing.T) {
+	m := deleting(t, flowsPath)
+	m.cursor = alertPath
+	m, _ = keys(t, m, "d", "r")
+	m2, _ := send(t, m, worktreesMsg{wts: threeWorktrees(), base: "origin/master"})
+	if m2.jobs[flowsPath].state != jobDeleting || m2.jobs[alertPath].state != jobChecking {
+		t.Errorf("jobs after reload: %+v", m2.jobs)
+	}
+	if l := lineWith(t, m2.View(), "eng-6458"); !strings.Contains(l, "deleting") {
+		t.Errorf("row after reload: %q", l)
+	}
+	m2, _ = send(t, m, worktreesMsg{wts: threeWorktrees()[:2], base: "origin/master"})
+	if _, ok := m2.jobs[flowsPath]; ok || m2.jobs[alertPath].state != jobChecking {
+		t.Errorf("a row that is gone keeps its job: %+v", m2.jobs)
+	}
+}
+
+// TestSpinnerTick: a tick advances the frame while a row has a job. With no
+// job, no tick command comes back.
+func TestSpinnerTick(t *testing.T) {
+	m := loaded(t)
+	if m2, cmd := send(t, m, tickMsg{}); cmd != nil || m2.spin != m.spin {
+		t.Errorf("tick without a job: cmd %v, frame %d", cmd != nil, m2.spin)
+	}
+	m.cursor = flowsPath
+	m, cmd := keys(t, m, "d")
+	if !hasTick(cmd) {
+		t.Fatal("the first job starts no tick")
+	}
+	m, _ = keys(t, m, "k")
+	for i := range 5 {
+		before := m.spin
+		m, cmd = send(t, m, tickMsg{})
+		if !isTick(cmd) || m.spin != (before+1)%len(spinFrames) {
+			t.Fatalf("tick %d: frame %d -> %d, tick cmd %v", i, before, m.spin, isTick(cmd))
+		}
+		if l := lineWith(t, m.View(), "eng-6458"); !strings.Contains(l, " "+spinFrames[m.spin]+" checking") {
+			t.Errorf("tick %d: row %q", i, l)
+		}
+	}
+	// A second job does not start a second tick.
+	m.cursor = alertPath
+	if _, cmd = keys(t, m, "d"); hasTick(cmd) {
+		t.Error("a second job starts a second tick")
+	}
+	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT, err: errors.New("x")})
+	if _, cmd = send(t, m, tickMsg{}); cmd != nil {
+		t.Error("tick with no job returns a command")
+	}
+}
+
+// TestJobRowWidth: no line is wider than the terminal while a row is deleted.
+func TestJobRowWidth(t *testing.T) {
+	old := renderer.ColorProfile()
+	renderer.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { renderer.SetColorProfile(old) })
+	const (
+		yellow = "\x1b[33m"
+		faint  = "\x1b[2m"
+	)
+	for _, w := range []int{40, 80} {
+		for _, cur := range []string{mainPath, alertPath} {
+			m := deleting(t, alertPath)
+			m.cursor = cur
+			m, _ = send(t, m, tea.WindowSizeMsg{Width: w, Height: 20})
+			v := m.View()
+			for _, l := range strings.Split(v, "\n") {
+				if lipgloss.Width(l) > w {
+					t.Errorf("width %d: line too wide (%d): %q", w, lipgloss.Width(l), l)
+				}
+			}
+			l := lineWith(t, v, "4 files") // the alert row
+			if !strings.Contains(l, "deleting") {
+				t.Errorf("width %d: the cut row lost its job: %q", w, l)
+			}
+			if cur == alertPath {
+				if !strings.HasPrefix(l, "\x1b[1;36m") || strings.Contains(l, yellow) || strings.Contains(l, faint) {
+					t.Errorf("width %d: cursor row: %q", w, l)
+				}
+				continue
+			}
+			if !strings.Contains(l, yellow+" "+spinFrames[m.spin]+" deleting") || !strings.Contains(l, faint) {
+				t.Errorf("width %d: job row is not dim with a yellow job: %q", w, l)
+			}
+		}
 	}
 }
 
@@ -789,15 +1050,19 @@ func TestDelResetAfterDelete(t *testing.T) {
 	m, _ = keys(t, m, "D")
 	m, _ = send(t, m, planMsg{wt: m.row(flowsPath).WT})
 	m, _ = send(t, m, removedMsg{path: flowsPath})
-	if m.del != (deleteState{}) {
-		t.Errorf("del not reset: %+v", m.del)
+	if len(m.jobs) != 0 {
+		t.Errorf("job not removed: %+v", m.jobs)
 	}
 	// The next d after a D does not delete the branch.
 	m.cursor = alertPath
 	m, _ = keys(t, m, "d")
 	m, _ = send(t, m, planMsg{wt: m.row(alertPath).WT})
-	if m.del.branch {
+	if m.jobs[alertPath].branch {
 		t.Error("the branch choice of the last D stays")
+	}
+	m, _ = send(t, m, removedMsg{path: alertPath, err: errors.New("boom")})
+	if len(m.jobs) != 0 || m.row(alertPath) == nil || m.note != "delete failed: boom" {
+		t.Errorf("failed delete: jobs %v, note %q", m.jobs, m.note)
 	}
 }
 

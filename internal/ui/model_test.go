@@ -61,6 +61,9 @@ func deps(t *testing.T) Deps {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	return Deps{
+		// An empty folder that is not a repository: a git command of a test
+		// with fake worktrees fails and never reads a real repository.
+		Git:   git.Runner{Dir: t.TempDir()},
 		Cfg:   config.Default(),
 		Cache: disk.LoadCache(cachePath()),
 		Repo:  repoPath,
@@ -112,7 +115,7 @@ func keys(t *testing.T, m Model, ks ...string) (Model, tea.Cmd) {
 }
 
 func isQuit(cmd tea.Cmd) bool {
-	if cmd == nil {
+	if cmd == nil || isTick(cmd) {
 		return false
 	}
 	_, ok := cmd().(tea.QuitMsg)
@@ -582,7 +585,7 @@ func TestCutKeepsMarks(t *testing.T) {
 	// The label with its marks fills the width exactly: no mark is cut.
 	r := status.Row{WT: git.Worktree{Path: "/r/other-folder", Branch: "feat", Locked: true, Prunable: true}}
 	label := status.Label(r)
-	if got := branchCell(r, lipgloss.Width(label), true); got != label {
+	if got := branchCell(r, lipgloss.Width(label), true, ""); got != label {
 		t.Errorf("branchCell at the label width = %q, want %q", got, label)
 	}
 }
