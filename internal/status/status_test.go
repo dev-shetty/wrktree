@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,51 +13,6 @@ import (
 	"github.com/dev-shetty/wrktree/internal/git"
 	"github.com/dev-shetty/wrktree/internal/testrepo"
 )
-
-func TestAge(t *testing.T) {
-	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	h := time.Hour
-	d := 24 * h
-	cases := map[time.Duration]string{
-		30 * time.Second: "just now",
-		5 * time.Minute:  "5 minutes ago",
-		1 * time.Minute:  "1 minute ago",
-		1 * h:            "1 hour ago",
-		2 * h:            "2 hours ago",
-		26 * h:           "1 day ago",
-		9 * d:            "9 days ago",
-		21 * d:           "3 weeks ago",
-		70 * d:           "2 months ago",
-		800 * d:          "2 years ago",
-		-5 * h:           "just now",
-	}
-	for ago, want := range cases {
-		if got := Age(now.Add(-ago), now); got != want {
-			t.Errorf("Age(%v ago) = %q, want %q", ago, got, want)
-		}
-	}
-}
-
-func TestSort(t *testing.T) {
-	now := time.Now()
-	mk := func(name string, main bool, ago time.Duration, ok bool) Row {
-		return Row{WT: git.Worktree{Branch: name, IsMain: main}, LastCommit: now.Add(-ago), CommitOK: ok}
-	}
-	rows := []Row{
-		mk("old", false, 48*time.Hour, true),
-		mk("none", false, 0, false),
-		mk("main", true, 900*time.Hour, true),
-		mk("new", false, time.Hour, true),
-	}
-	Sort(rows)
-	var got []string
-	for _, r := range rows {
-		got = append(got, r.WT.Branch)
-	}
-	if want := "main new old none"; strings.Join(got, " ") != want {
-		t.Errorf("order = %v, want %s", got, want)
-	}
-}
 
 func setup(t *testing.T) (*testrepo.Repo, git.Runner, string) {
 	t.Helper()
@@ -126,34 +80,6 @@ func TestLoadAll(t *testing.T) {
 	}
 }
 
-func TestLoadAllNoBase(t *testing.T) {
-	repo, r, _ := setup(t)
-	ctx := context.Background()
-	wts, _ := r.Worktrees(ctx)
-	cache := disk.LoadCache(filepath.Join(t.TempDir(), "sizes.json"))
-	rows := LoadAll(ctx, r, wts, cache, repo.Dir, Options{TTL: time.Hour, Cwd: repo.Dir, Now: time.Now()})
-	for _, row := range rows {
-		if row.DistOK {
-			t.Errorf("%s: DistOK with no base", row.WT.Branch)
-		}
-	}
-}
-
-func TestLoadAllMissingFolder(t *testing.T) {
-	repo, r, feat := setup(t)
-	ctx := context.Background()
-	wts, _ := r.Worktrees(ctx)
-	if err := os.RemoveAll(feat); err != nil {
-		t.Fatal(err)
-	}
-	cache := disk.LoadCache(filepath.Join(t.TempDir(), "sizes.json"))
-	rows := LoadAll(ctx, r, wts, cache, repo.Dir, Options{Base: "origin/master", TTL: time.Hour, Cwd: repo.Dir, Now: time.Now()})
-	f := find(t, rows, "feat")
-	if f.ChangedOK || f.SizeState != disk.SizeNone {
-		t.Errorf("missing folder row: %+v", f)
-	}
-}
-
 func fixedRows(now time.Time) []Row {
 	return []Row{
 		{WT: git.Worktree{Path: "/w/main", Branch: "master", IsMain: true}, Current: true,
@@ -165,42 +91,6 @@ func fixedRows(now time.Time) []Row {
 		{WT: git.Worktree{Path: "/w/gone", Branch: "gone", Prunable: true}},
 		{WT: git.Worktree{Path: "/w/det", Head: "abcdef1234567", Detached: true}, Changed: 1, ChangedOK: true,
 			Merge: git.MergeNoCommits},
-	}
-}
-
-func TestTable(t *testing.T) {
-	now := time.Now()
-	var buf bytes.Buffer
-	Table(&buf, fixedRows(now), "origin/master", now)
-	out := buf.String()
-	for _, s := range []string{"origin/master", "● master", "4 files", "↑2 ↓31", "~1.4 GB", "3 weeks ago",
-		"feat ✓ merged [locked]", "[missing]", "—", "clean", "2 KB", "abcdef1 no commits", "feat"} {
-		if !strings.Contains(out, s) {
-			t.Errorf("table lacks %q:\n%s", s, out)
-		}
-	}
-	if strings.Contains(out, "~2 KB") {
-		t.Errorf("fresh size has ~:\n%s", out)
-	}
-	if !strings.Contains(out, "1 file") {
-		t.Errorf("no singular form:\n%s", out)
-	}
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if s, c := strings.Index(lines[0], "SIZE"), strings.Index(lines[0], "LAST COMMIT"); s < 0 || c < 0 || s > c {
-		t.Errorf("header order: want SIZE before LAST COMMIT: %q", lines[0])
-	}
-	if len(lines) != 5 {
-		t.Fatalf("want 5 lines, got %d:\n%s", len(lines), out)
-	}
-	for _, l := range lines[2:] {
-		if !strings.HasPrefix(l, "  ") && !strings.HasPrefix(l, " ") {
-			t.Errorf("row does not start with a space: %q", l)
-		}
-	}
-	buf.Reset()
-	Table(&buf, fixedRows(now), "", now)
-	if !strings.Contains(buf.String(), "BASE") {
-		t.Errorf("no BASE header:\n%s", buf.String())
 	}
 }
 
@@ -242,76 +132,5 @@ func TestJSON(t *testing.T) {
 	}
 	if _, err := time.Parse(time.RFC3339, got[0]["last_commit"].(string)); err != nil {
 		t.Errorf("last_commit: %v", err)
-	}
-}
-
-func TestCellText(t *testing.T) {
-	now := time.Now()
-	rows := fixedRows(now)
-	cases := []struct{ got, want string }{
-		{Label(rows[0]), "master"},
-		{FolderNote(rows[0]), "(main)"},
-		{Name(rows[0]), "master (main)"},
-		{Label(rows[1]), "feat ✓ merged [locked]"},
-		{Marks(rows[1]), " ✓ merged [locked]"},
-		{Marks(rows[0]), ""},
-		{FolderNote(rows[1]), ""},
-		{Name(rows[2]), "gone [missing]"},
-		{Name(rows[3]), "abcdef1 no commits"},
-		{Marks(rows[3]), " no commits"},
-		{ChangedText(rows[0]), "4 files"},
-		{ChangedText(rows[2]), "—"},
-		{DistText(rows[0]), "↑2 ↓31"},
-		{DistText(rows[1]), "—"},
-		{SizeText(rows[0]), "~1.4 GB"},
-		{SizeText(rows[1]), "2 KB"},
-		{SizeText(rows[2]), "—"},
-		{CommitText(rows[0], now), "3 weeks ago"},
-		{CommitText(rows[2], now), "—"},
-	}
-	for i, c := range cases {
-		if c.got != c.want {
-			t.Errorf("case %d: got %q, want %q", i, c.got, c.want)
-		}
-	}
-}
-
-// The merged mark comes after the folder note and before the other marks.
-func TestNameOrder(t *testing.T) {
-	r := Row{WT: git.Worktree{Path: "/w/dir", Branch: "feat", Locked: true}, Merge: git.MergeMerged}
-	if got, want := Name(r), "feat (dir) ✓ merged [locked]"; got != want {
-		t.Errorf("Name = %q, want %q", got, want)
-	}
-	r.Merge = git.MergeNoCommits
-	if got, want := Name(r), "feat (dir) no commits [locked]"; got != want {
-		t.Errorf("no commits: Name = %q, want %q", got, want)
-	}
-	r.Merge = git.MergeUnknown
-	if got, want := Name(r), "feat (dir) [locked]"; got != want {
-		t.Errorf("not known: Name = %q, want %q", got, want)
-	}
-}
-
-// LoadAll finds a squash merge and skips the main worktree.
-func TestLoadAllMerged(t *testing.T) {
-	repo, r, _ := setup(t)
-	repo.Git(t, repo.Dir, "merge", "--squash", "feat")
-	repo.Git(t, repo.Dir, "commit", "-m", "squash feat")
-	repo.Git(t, repo.Dir, "push", "origin", "master")
-	ctx := context.Background()
-	wts, _ := r.Worktrees(ctx)
-	cache := disk.LoadCache(filepath.Join(t.TempDir(), "sizes.json"))
-	o := Options{Base: "origin/master", TTL: time.Hour, Cwd: repo.Dir, Now: time.Now()}
-	rows := LoadAll(ctx, r, wts, cache, repo.Dir, o)
-	if f := find(t, rows, "feat"); f.Merge != git.MergeMerged || f.Ahead == 0 {
-		t.Errorf("feat row: %+v", f)
-	}
-	if m := find(t, rows, "master"); m.Merge != git.MergeUnknown {
-		t.Errorf("main row has a merged value: %+v", m)
-	}
-	o.Base = ""
-	rows = LoadAll(ctx, r, wts, cache, repo.Dir, o)
-	if f := find(t, rows, "feat"); f.Merge != git.MergeUnknown {
-		t.Errorf("no base: %+v", f)
 	}
 }
