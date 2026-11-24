@@ -73,7 +73,7 @@ type Model struct {
 	width, height int
 	result        Result
 
-	// jobs holds the delete job of each row that has one, by path. Change it
+	// jobs holds the delete or sync job of each row that has one, by path. Change it
 	// only with setJob and dropJob: a copy of the Model keeps its own map.
 	jobs     map[string]job
 	spin     int    // frame of the spinner
@@ -131,6 +131,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.planDone(msg)
 	case removedMsg:
 		return m.removed(msg)
+	case syncedMsg:
+		return m.synced(msg)
 	case tickMsg:
 		return m.spun()
 	case pruneListMsg:
@@ -352,12 +354,13 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.move(1)
 	case "enter", "o":
 		// A quit during a delete can leave the shell in a deleted directory.
-		if n := m.deletes(); n > 0 {
-			m.note = waitNote(n)
+		// A quit during a sync can stop the merge half way.
+		if d, s := m.deletes(), m.syncs(); d+s > 0 {
+			m.note = waitNote(d, s)
 			return m, nil
 		}
-		if _, ok := m.jobs[m.cursorPath()]; ok {
-			m.note = inProgressNote
+		if j, ok := m.jobs[m.cursorPath()]; ok {
+			m.note = jobNote(j)
 			return m, nil
 		}
 		return m.choose(k == "o")
@@ -377,7 +380,13 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startDelete(false)
 	case "D":
 		return m.startDelete(true)
+	case "s":
+		return m.startSync()
 	case "p":
+		if m.syncs() > 0 {
+			m.note = syncInProgressNote
+			return m, nil
+		}
 		if len(m.jobs) > 0 {
 			m.note = inProgressNote
 			return m, nil
@@ -387,8 +396,8 @@ func (m Model) listKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.mode = modeFilter
 	case "q", "esc":
-		if n := m.deletes(); n > 0 {
-			m.note = waitNote(n)
+		if d, s := m.deletes(), m.syncs(); d+s > 0 {
+			m.note = waitNote(d, s)
 			return m, nil
 		}
 		return m, tea.Quit

@@ -184,7 +184,7 @@ func TestViewShowsRows(t *testing.T) {
 	v := loaded(t).View()
 	for _, s := range []string{"master", "eng-6201-onboarding-v2-alerts", "eng-6458-bugsink-key-flows",
 		"origin/master", "4 files", "↑2 ↓31", "3 worktrees", "wrktree · mono", "1.4 GB", "3 weeks ago",
-		" enter switch · o open · c copy · d delete · D delete + branch · p prune · f fetch · / filter · q quit"} {
+		" enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit"} {
 		if !strings.Contains(v, s) {
 			t.Errorf("view lacks %q:\n%s", s, v)
 		}
@@ -970,7 +970,7 @@ func TestFooterWraps(t *testing.T) {
 	if len(foot) < 2 || strings.Contains(all, "…") {
 		t.Errorf("footer does not wrap: %q", foot)
 	}
-	for _, k := range []string{"enter switch", "o open", "c copy", "d delete", "D delete + branch", "p prune", "f fetch", "/ filter", "q quit"} {
+	for _, k := range []string{"enter switch", "o open", "c copy", "s sync", "d delete", "D delete + branch", "p prune", "f fetch", "/ filter", "q quit"} {
 		if !strings.Contains(all, k) {
 			t.Errorf("footer lacks %q: %q", k, foot)
 		}

@@ -21,9 +21,10 @@ type jobState int
 const (
 	jobChecking jobState = iota + 1 // the delete plan is read, or the typed prompt asks
 	jobDeleting                     // git worktree remove runs
+	jobSyncing                      // git.Runner.Sync runs
 )
 
-// job is the delete of one row.
+// job is the delete or the sync of one row.
 type job struct {
 	state  jobState
 	branch bool // also delete the branch: D started the delete. After the plan, only if wt has a branch.
@@ -92,12 +93,38 @@ func (m Model) deletes() int {
 	return n
 }
 
-// waitNote is the note for a quit key while n deletes run.
-func waitNote(n int) string {
-	if n == 1 {
-		return "1 delete in progress: wait, or press ctrl+c"
+// syncs returns the number of syncs that run.
+func (m Model) syncs() int {
+	n := 0
+	for _, j := range m.jobs {
+		if j.state == jobSyncing {
+			n++
+		}
 	}
-	return fmt.Sprintf("%d deletes in progress: wait, or press ctrl+c", n)
+	return n
+}
+
+// waitNote is the note for a quit key while deletes and syncs run.
+func waitNote(deletes, syncs int) string {
+	word, n := "job", deletes+syncs
+	switch {
+	case syncs == 0:
+		word = "delete"
+	case deletes == 0:
+		word = "sync"
+	}
+	if n != 1 {
+		word += "s"
+	}
+	return fmt.Sprintf("%d %s in progress: wait, or press ctrl+c", n, word)
+}
+
+// jobNote is the note for a key that the job j blocks on its row.
+func jobNote(j job) string {
+	if j.state == jobSyncing {
+		return syncInProgressNote
+	}
+	return inProgressNote
 }
 
 // jobText is the text after the label of a row with a job, for example
@@ -108,8 +135,11 @@ func (m Model) jobText(path string) string {
 		return ""
 	}
 	word := "checking"
-	if j.state == jobDeleting {
+	switch j.state {
+	case jobDeleting:
 		word = "deleting"
+	case jobSyncing:
+		word = "syncing"
 	}
 	return " " + spinFrames[m.spin] + " " + word
 }
@@ -157,8 +187,8 @@ func (m Model) startDelete(branch bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	w := m.visible()[i].WT
-	if _, ok := m.jobs[w.Path]; ok {
-		m.note = inProgressNote
+	if j, ok := m.jobs[w.Path]; ok {
+		m.note = jobNote(j)
 		return m, nil
 	}
 	m.setJob(w.Path, job{state: jobChecking, branch: branch})
@@ -332,9 +362,9 @@ func (m Model) removed(msg removedMsg) (tea.Model, tea.Cmd) {
 }
 
 // finish quits with m.after when the current worktree is gone and no other
-// delete runs.
+// delete or sync runs.
 func (m Model) finish() (tea.Model, tea.Cmd) {
-	if m.after.SwitchPath != "" && m.deletes() == 0 {
+	if m.after.SwitchPath != "" && m.deletes() == 0 && m.syncs() == 0 {
 		m.result = m.after
 		return m, tea.Quit
 	}

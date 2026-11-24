@@ -111,7 +111,7 @@ If the current directory is not in a git repository, each command prints
    eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · c copy · d delete · D delete + branch · p prune · f fetch · / filter · q quit
+ enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory. `›` marks the cursor.
@@ -139,14 +139,15 @@ Keys:
 | `enter` | Switch to the worktree and quit. |
 | `o` | Quit, then run the open command on the worktree. |
 | `c` | Copy the branch name to the system clipboard. A detached worktree gives the 7-character head. |
+| `s` | Merge the base branch into the branch of the worktree, in the background. |
 | `d` | Delete the worktree. The branch stays. A clean worktree has no prompt. |
 | `D` | Delete the worktree, then its branch with `git branch -d`. |
 | `p` | Show stale entries, then prune after confirmation. |
 | `f` | Run `git fetch origin`, then calculate the distances again. |
 | `/` | Filter the rows by text. |
 | `r` | Read all values again. |
-| `q` `esc` | Quit. While a delete runs, these keys do not quit. |
-| `ctrl+c` | Quit at once, also while a delete runs. |
+| `q` `esc` | Quit. While a delete or a sync runs, these keys do not quit. |
+| `ctrl+c` | Quit at once, also while a delete or a sync runs. |
 
 The key help wraps onto more lines at the ` · ` separators when it does not
 fit the terminal width. The table shows fewer rows for each extra line.
@@ -405,6 +406,26 @@ configuration file.
 - A merge with conflicts gives the conflict files. A merge that failed for a
   different reason, for example a hook, gives the git message.
 - Sync never pushes, rebases, resets, or stashes.
+- In the screen, `s` gives the cursor row a `syncing` job, with the same
+  spinner and row style as `deleting`. The screen stays live. A row has one
+  job at a time: on a row with a job, `s`, `d`, `D`, `enter`, and `o` set the
+  note `<job word> in progress` (`sync in progress` or `delete in progress`)
+  and do nothing. While a prune step runs, `s` does nothing. While a sync
+  runs, `p` sets the note `sync in progress`.
+- When the sync is done, the job ends. The note is `synced <label> with
+  <base>`, `<label> is already up to date with <base>`, `sync failed:
+  conflict in <files>`, the refusal text, or `sync failed: <error>`. If the
+  fetch failed, a success or up-to-date note ends with ` (fetch failed: used
+  the local copy)`.
+- After a sync that changed the branch, the screen starts the value commands
+  of the row again: changed files, distance, last commit, merged state, and
+  the size with a new `du`.
+- Quit rule: while a sync runs, `q`, `esc`, `enter`, and `o` do not quit.
+  Only deletes: `N delete in progress: wait, or press ctrl+c`. Only syncs:
+  `N sync in progress: wait, or press ctrl+c` (`N syncs` for more than one).
+  Both kinds: `N jobs in progress: wait, or press ctrl+c`. After the delete
+  of the current worktree, the screen also waits for the syncs before it
+  quits.
 - `wrktree sync <name>` prints `synced <branch> with <base>` or
   `<branch> is already up to date with <base>` on stdout. A failed fetch adds
   `wrktree: fetch failed: used the local copy of <base>` on stderr. A

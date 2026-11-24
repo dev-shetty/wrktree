@@ -13,7 +13,7 @@
    eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · c copy · d delete · D delete + branch · p prune · f fetch · / filter · q quit
+ enter switch · o open · c copy · s sync · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory.
@@ -85,17 +85,18 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 | Key | Action |
 |---|---|
 | `↑` `↓` `←` `→` `j` `k` | Move the cursor. `←` moves up and `→` moves down. From the first row, a move up goes to the last row. |
-| `enter` | Change to the worktree and quit. While a delete runs, `enter` does not quit. |
-| `o` | Quit, then run the open command on the worktree. While a delete runs, `o` does not quit. |
+| `enter` | Change to the worktree and quit. While a delete or a sync runs, `enter` does not quit. |
+| `o` | Quit, then run the open command on the worktree. While a delete or a sync runs, `o` does not quit. |
 | `c` | Copy the branch name to the system clipboard. For a detached worktree, copy the 7-character commit hash. |
+| `s` | Merge the base branch into the branch of the worktree. See [Sync](#sync). The sync runs in the background. |
 | `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. The delete runs in the background. |
 | `D` | Delete the worktree, then delete its branch with `git branch -d`. |
 | `p` | Show the stale worktree entries, then prune them after a prompt. |
 | `f` | Fetch the base branch again, then calculate the distances again. |
 | `/` | Filter the rows by branch name or folder name. |
 | `r` | Read all values again, and measure all disk sizes again. |
-| `q` `esc` | Quit. While a delete runs, these keys do not quit. |
-| `ctrl+c` | Quit at once, also while a delete runs. |
+| `q` `esc` | Quit. While a delete or a sync runs, these keys do not quit. |
+| `ctrl+c` | Quit at once, also while a delete or a sync runs. |
 
 If the key help does not fit the terminal width, it wraps onto more lines at the ` · ` separators. The table then shows fewer rows.
 
@@ -237,6 +238,15 @@ Sync refuses in these cases. It changes nothing, prints the reason, and stops wi
 A conflict cancels the merge with `git merge --abort`. Thus the worktree stays as it was before the sync. `wrktree` prints `sync failed: conflict in <files>` and stops with exit code 1. After 3 files, the list ends with `and N more`. To merge with conflicts, run `git merge` yourself.
 
 `wrktree` cancels only the merge that it started. A merge that you started stays.
+
+In the screen, press `s` on a row:
+
+- The sync runs in the background. The screen stays live. The row shows a spinner and `syncing`, as a delete does.
+- A row has one job at a time. On a row with a job, `s`, `d`, `D`, `enter`, and `o` do nothing. The footer shows `sync in progress` or `delete in progress`.
+- When the sync is done, the footer shows the result: `synced <branch> with <base>`, `<branch> is already up to date with <base>`, `sync failed: conflict in <files>`, or the refusal text. If the fetch failed, the footer adds `(fetch failed: used the local copy)`.
+- After a sync that changed the branch, the screen reads the values of the row again. It also measures the size again.
+- While a prune step runs, `s` does nothing. While a sync runs, `p` does nothing and the footer shows `sync in progress`.
+- While a sync runs, `q`, `esc`, `enter`, and `o` do not quit. The footer shows `1 sync in progress: wait, or press ctrl+c`. If deletes and syncs run together, the footer shows `N jobs in progress: wait, or press ctrl+c`.
 
 Sync never pushes. It never rebases, resets, or stashes. The merge gets `GIT_MERGE_AUTOEDIT=no` and `GIT_TERMINAL_PROMPT=0`, so git does not open an editor or ask for a password.
 
