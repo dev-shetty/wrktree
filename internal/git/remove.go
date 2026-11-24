@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -89,7 +88,7 @@ func (r Runner) DeleteBranch(ctx context.Context, branch string) error {
 // PruneDryRun returns one line for each stale worktree entry. Git prints these
 // lines on stderr.
 func (r Runner) PruneDryRun(ctx context.Context) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", r.Dir, "worktree", "prune", "--dry-run", "-v")
+	cmd := r.command(ctx, "worktree", "prune", "--dry-run", "-v")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
