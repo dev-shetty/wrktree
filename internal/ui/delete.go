@@ -356,6 +356,9 @@ func (m Model) removed(msg removedMsg) (tea.Model, tea.Cmd) {
 		m.note += " and its branch"
 	}
 	if ok && j.current {
+		// The directory of the git runner is gone. The next commands run in
+		// the main worktree.
+		m.d.Git = m.d.Git.In(j.main)
 		m.after = Result{SwitchPath: j.main}
 		if msg.branchErr != nil {
 			m.after.Message = m.note
