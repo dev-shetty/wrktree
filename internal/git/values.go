@@ -85,7 +85,15 @@ func (r Runner) LastCommit(ctx context.Context, path string) (time.Time, error) 
 // a local branch "main", is not fetched, and that is no error. The remote is
 // the longest configured remote name that base starts with, so a remote or a
 // branch can contain a slash.
+//
+// Only one fetch of a base runs at one time. A call that comes during a
+// fetch of the same base waits for that fetch and returns its result. Two
+// fetches of one ref at the same time fail with "cannot lock ref".
 func (r Runner) FetchBase(ctx context.Context, base string) error {
+	return fetches.do(ctx, r.Dir+"\x00"+base, func() error { return r.fetchBase(ctx, base) })
+}
+
+func (r Runner) fetchBase(ctx context.Context, base string) error {
 	_, err := r.Run(ctx, "rev-parse", "--verify", "--quiet", "refs/remotes/"+base)
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
