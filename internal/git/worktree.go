@@ -2,6 +2,8 @@ package git
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -88,4 +90,66 @@ func (r Runner) RepoName(ctx context.Context) string {
 		name = strings.TrimSuffix(name, ".git")
 	}
 	return name
+}
+
+// resolve returns the real path of p, or the cleaned path if p does not exist.
+func resolve(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
+// Current returns the index of the worktree that contains cwd, or -1.
+// If worktrees are nested, the deepest one wins.
+func Current(wts []Worktree, cwd string) int {
+	cwd = resolve(cwd)
+	best, bestLen := -1, -1
+	for i, w := range wts {
+		p := resolve(w.Path)
+		if (cwd == p || strings.HasPrefix(cwd, p+string(filepath.Separator))) && len(p) > bestLen {
+			best, bestLen = i, len(p)
+		}
+	}
+	return best
+}
+
+// ErrNoMatch means that no worktree matches a name.
+var ErrNoMatch = errors.New("no worktree matches")
+
+// AmbiguousError means that more than one worktree matches a name.
+type AmbiguousError struct {
+	Name    string
+	Matches []Worktree
+}
+
+func (e *AmbiguousError) Error() string {
+	return fmt.Sprintf("more than one worktree matches %q", e.Name)
+}
+
+// Match finds one worktree by name. An exact match of the branch or the folder
+// name wins. Otherwise a case-insensitive substring of either must match once.
+func Match(wts []Worktree, name string) (Worktree, error) {
+	n := strings.ToLower(name)
+	var exact, partial []Worktree
+	for _, w := range wts {
+		b, f := strings.ToLower(w.Branch), strings.ToLower(filepath.Base(w.Path))
+		if b == n || f == n {
+			exact = append(exact, w)
+		}
+		if strings.Contains(b, n) || strings.Contains(f, n) {
+			partial = append(partial, w)
+		}
+	}
+	for _, set := range [][]Worktree{exact, partial} {
+		switch len(set) {
+		case 0:
+			continue
+		case 1:
+			return set[0], nil
+		default:
+			return Worktree{}, &AmbiguousError{Name: name, Matches: set}
+		}
+	}
+	return Worktree{}, fmt.Errorf("%w %q", ErrNoMatch, name)
 }
