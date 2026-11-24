@@ -13,8 +13,9 @@ import (
 var ErrNoBase = errors.New("no base branch")
 
 // ChangedFiles counts the changed and untracked files of the worktree at path.
+// The flags make the count independent of the git configuration.
 func (r Runner) ChangedFiles(ctx context.Context, path string) (int, error) {
-	out, err := r.In(path).Run(ctx, "status", "--porcelain")
+	out, err := r.In(path).Run(ctx, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
 		return 0, err
 	}

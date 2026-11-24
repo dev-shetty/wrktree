@@ -248,3 +248,21 @@ func TestPrune(t *testing.T) {
 		t.Errorf("after prune: lines = %#v, err = %v; want 0 lines", lines, err)
 	}
 }
+
+// "status.showUntrackedFiles=no" must not hide untracked files from the plan.
+func TestPlanDeleteUntrackedIgnoresConfig(t *testing.T) {
+	repo := testrepo.New(t)
+	path := repo.AddWorktree(t, "feat")
+	repo.Git(t, repo.Dir, "config", "status.showUntrackedFiles", "no")
+	if err := os.WriteFile(filepath.Join(path, "new.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Runner{Dir: repo.Dir}
+	p, err := r.PlanDelete(context.Background(), find(t, r, "feat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Changed != 1 || !p.NeedsYes {
+		t.Errorf("plan = %+v, want Changed 1 and NeedsYes", p)
+	}
+}
