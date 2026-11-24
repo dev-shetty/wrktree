@@ -111,11 +111,20 @@ func TestOpen(t *testing.T) {
 	var got opened
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	if _, _, err := runWith(t, repo.Dir, runOpts{opened: &got}, "open", "feat-a"); err != nil {
-		t.Fatal(err)
-	}
-	if got.template != "code -n {path}" || got.path != feat {
-		t.Errorf("got %+v", got)
+	// With no configuration file, the open command is $VISUAL, then $EDITOR, then VS Code.
+	for _, c := range []struct{ visual, editor, want string }{
+		{"", "", "code -n {path}"},
+		{"", "vim", "vim"},
+		{"zed", "vim", "zed"},
+	} {
+		t.Setenv("VISUAL", c.visual)
+		t.Setenv("EDITOR", c.editor)
+		if _, _, err := runWith(t, repo.Dir, runOpts{opened: &got}, "open", "feat-a"); err != nil {
+			t.Fatal(err)
+		}
+		if got.template != c.want || got.path != feat {
+			t.Errorf("VISUAL=%q EDITOR=%q: got %+v, want template %q", c.visual, c.editor, got, c.want)
+		}
 	}
 
 	cfg := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "wrktree", "config.toml")

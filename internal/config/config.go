@@ -21,7 +21,18 @@ type Config struct {
 
 // Default returns the settings that apply when no file sets them.
 func Default() Config {
-	return Config{Open: "code -n {path}", Base: "", Fetch: true, SizeTTL: 24 * time.Hour}
+	return Config{Open: defaultOpen(), Base: "", Fetch: true, SizeTTL: 24 * time.Hour}
+}
+
+// defaultOpen returns the editor of the user: $VISUAL, then $EDITOR, then
+// VS Code. The open command adds the path at the end.
+func defaultOpen() string {
+	for _, k := range []string{"VISUAL", "EDITOR"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return "code -n {path}"
 }
 
 // Path returns the location of the configuration file.

@@ -107,11 +107,13 @@ A sync fetches the base branch, then runs `git merge --no-edit <base>` in the wo
 The configuration file is optional. Its location is `~/.config/wrktree/config.toml`. These are the default values:
 
 ```toml
-open = "code -n {path}"   # command for the o key
+open = "code -n {path}"   # command for the o key. See below
 base = ""                 # base branch. Empty = the default branch of origin
 fetch = true              # fetch the base branch when the screen opens
 size_ttl = "24h"          # how long a cached disk size stays valid
 ```
+
+If the file does not set `open`, `wrktree` uses `$VISUAL`, then `$EDITOR`, then `code -n {path}`.
 
 Examples for `open`:
 
