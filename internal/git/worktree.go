@@ -92,22 +92,39 @@ func (r Runner) RepoName(ctx context.Context) string {
 	return name
 }
 
-// resolve returns the real path of p, or the cleaned path if p does not exist.
+// resolve returns the real path of p. If p does not exist, it resolves the
+// longest part of p that exists and adds the rest.
 func resolve(p string) string {
+	p = filepath.Clean(p)
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
 	}
-	return filepath.Clean(p)
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(resolve(parent), filepath.Base(p))
+}
+
+// Contains reports whether path is dir or is below dir. It compares the real
+// paths and splits only at a path separator: "/a/bc" is not below "/a/b".
+func Contains(dir, path string) bool {
+	dir, path = resolve(dir), resolve(path)
+	if path == dir {
+		return true
+	}
+	if !strings.HasSuffix(dir, string(filepath.Separator)) {
+		dir += string(filepath.Separator)
+	}
+	return strings.HasPrefix(path, dir)
 }
 
 // Current returns the index of the worktree that contains cwd, or -1.
 // If worktrees are nested, the deepest one wins.
 func Current(wts []Worktree, cwd string) int {
-	cwd = resolve(cwd)
 	best, bestLen := -1, -1
 	for i, w := range wts {
-		p := resolve(w.Path)
-		if (cwd == p || strings.HasPrefix(cwd, p+string(filepath.Separator))) && len(p) > bestLen {
+		if p := resolve(w.Path); Contains(p, cwd) && len(p) > bestLen {
 			best, bestLen = i, len(p)
 		}
 	}

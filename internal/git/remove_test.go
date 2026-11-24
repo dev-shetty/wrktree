@@ -266,3 +266,58 @@ func TestPlanDeleteUntrackedIgnoresConfig(t *testing.T) {
 		t.Errorf("plan = %+v, want Changed 1 and NeedsYes", p)
 	}
 }
+
+// nestedRepo adds a worktree "outer" and a worktree "nested" inside it. An
+// ignore rule hides the nested folder, so the status of outer is clean.
+func nestedRepo(t *testing.T) (repo *testrepo.Repo, outer, nested string) {
+	t.Helper()
+	repo = testrepo.New(t)
+	outer = repo.AddWorktree(t, "outer")
+	if err := os.WriteFile(filepath.Join(outer, ".gitignore"), []byte("nested/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git(t, outer, "add", ".gitignore")
+	repo.Git(t, outer, "commit", "-m", "ignore nested")
+	nested = filepath.Join(outer, "nested")
+	repo.Git(t, repo.Dir, "worktree", "add", "-b", "nested", nested)
+	return repo, outer, nested
+}
+
+func TestPlanDeleteNestedWorktree(t *testing.T) {
+	repo, _, nested := nestedRepo(t)
+	r := Runner{Dir: repo.Dir}
+	p, err := r.PlanDelete(context.Background(), find(t, r, "outer"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Blocked != "contains worktree nested: delete it first" {
+		t.Errorf("plan = %+v, want blocked by the nested worktree", p)
+	}
+
+	// A detached nested worktree has the short head as its label.
+	repo.Git(t, nested, "switch", "--detach")
+	head := repo.Git(t, nested, "rev-parse", "HEAD")
+	if p, err = r.PlanDelete(context.Background(), find(t, r, "outer")); err != nil {
+		t.Fatal(err)
+	}
+	if want := "contains worktree " + head[:7] + ": delete it first"; p.Blocked != want {
+		t.Errorf("Blocked = %q, want %q", p.Blocked, want)
+	}
+
+	// The nested worktree itself has nothing below it.
+	if p, err = r.PlanDelete(context.Background(), find(t, r, "nested")); err != nil || p.Blocked != "" {
+		t.Errorf("nested: plan = %+v, err = %v", p, err)
+	}
+}
+
+// A sibling whose name starts with the name of the target is not inside it.
+func TestPlanDeleteSiblingPrefix(t *testing.T) {
+	repo := testrepo.New(t)
+	repo.AddWorktree(t, "feat")
+	repo.AddWorktree(t, "feat-2")
+	r := Runner{Dir: repo.Dir}
+	p, err := r.PlanDelete(context.Background(), find(t, r, "feat"))
+	if err != nil || p.Blocked != "" {
+		t.Errorf("plan = %+v, err = %v", p, err)
+	}
+}

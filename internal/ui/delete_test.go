@@ -672,3 +672,29 @@ func TestDelResetAfterDelete(t *testing.T) {
 		t.Errorf("del not reset: %+v", m.del)
 	}
 }
+
+// TestDeleteNestedBlocked: a worktree with another worktree inside its
+// folder cannot be deleted. The nested folder is ignored, so it looks clean.
+func TestDeleteNestedBlocked(t *testing.T) {
+	repo := testrepo.New(t)
+	outer := realPath(t, repo.AddWorktree(t, "outer"))
+	if err := os.WriteFile(filepath.Join(outer, ".gitignore"), []byte("nested/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git(t, outer, "add", ".gitignore")
+	repo.Git(t, outer, "commit", "-m", "ignore nested")
+	nested := filepath.Join(outer, "nested")
+	repo.Git(t, repo.Dir, "worktree", "add", "-b", "nested", nested)
+
+	m, _ := repoModel(t, repo, repo.Dir, true)
+	m = pressD(t, m, outer)
+	if v := m.View(); !strings.Contains(v, "contains worktree nested: delete it first") || inPrompt(m) {
+		t.Errorf("nested worktree:\n%s", v)
+	}
+	if _, cmd := keys(t, m, "y"); cmd != nil {
+		t.Error("y starts a command")
+	}
+	if !exists(outer) || !exists(nested) {
+		t.Error("a folder is gone")
+	}
+}

@@ -498,7 +498,7 @@ func (m Model) planDone(msg planMsg) (tea.Model, tea.Cmd) {
 	}
 	main := m.mainPath()
 	// The shell is in the worktree if the directory is in its folder.
-	current := git.Current([]git.Worktree{msg.wt}, m.d.Cwd) == 0
+	current := git.Contains(msg.wt.Path, m.d.Cwd)
 	if current && (!m.d.CanCD || main == "") {
 		m.note = currentNote
 		return m, nil

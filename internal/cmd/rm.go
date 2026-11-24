@@ -50,7 +50,9 @@ func runRm(c *cobra.Command, env Env, name string, f rmFlags) error {
 	if plan.Blocked != "" {
 		return errors.New(plan.Blocked)
 	}
-	if cur := git.Current(wts, env.Dir); cur >= 0 && samePath(wts[cur], wt) {
+	// The shell is in the worktree if the directory is in its folder, also
+	// inside a nested worktree.
+	if git.Contains(wt.Path, env.Dir) {
 		return errors.New("cannot delete the worktree of the current directory")
 	}
 
@@ -86,8 +88,6 @@ func runRm(c *cobra.Command, env Env, name string, f rmFlags) error {
 	fmt.Fprintf(env.Stdout, "deleted %s\n", wt.Path)
 	return nil
 }
-
-func samePath(a, b git.Worktree) bool { return a.Path == b.Path }
 
 // yesOrY accepts "y" or "yes" in any case.
 func yesOrY(answer string) bool {

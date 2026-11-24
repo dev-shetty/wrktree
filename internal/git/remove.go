@@ -18,8 +18,9 @@ type DeletePlan struct {
 }
 
 // PlanDelete checks a worktree. The order of checks is: main, locked, missing
-// folder, then the counts of changes. It returns an error if it cannot read
-// the state of an existing worktree. It never treats an unreadable worktree as clean.
+// folder, other worktrees inside its folder, then the counts of changes. It
+// returns an error if it cannot read the state of an existing worktree. It
+// never treats an unreadable worktree as clean.
 func (r Runner) PlanDelete(ctx context.Context, wt Worktree) (DeletePlan, error) {
 	switch {
 	case wt.IsMain:
@@ -31,8 +32,18 @@ func (r Runner) PlanDelete(ctx context.Context, wt Worktree) (DeletePlan, error)
 	case wt.Prunable:
 		return DeletePlan{Blocked: "folder is missing: use prune"}, nil
 	}
+	// "git worktree remove" deletes a nested worktree with the folder, and
+	// the status of the folder does not show it.
+	all, err := r.Worktrees(ctx)
+	if err != nil {
+		return DeletePlan{}, err
+	}
+	for _, o := range all {
+		if resolve(o.Path) != resolve(wt.Path) && Contains(wt.Path, o.Path) {
+			return DeletePlan{Blocked: "contains worktree " + label(o) + ": delete it first"}, nil
+		}
+	}
 	var p DeletePlan
-	var err error
 	if p.Changed, err = r.ChangedFiles(ctx, wt.Path); err != nil {
 		return DeletePlan{}, err
 	}
@@ -103,15 +114,9 @@ func (r Runner) Prune(ctx context.Context) error {
 // wt. It does not contain the end part: the caller adds "[y/N] " when
 // plan.NeedsYes is false, or "Type yes to delete: " when it is true.
 func DeletePrompt(wt Worktree, p DeletePlan) string {
-	label := wt.Branch
-	if label == "" {
-		label = wt.Head
-		if len(label) > 7 {
-			label = label[:7]
-		}
-	}
+	name := label(wt)
 	if !p.NeedsYes {
-		return fmt.Sprintf("Delete worktree %s at %s? Ignored files are deleted too. ", label, wt.Path)
+		return fmt.Sprintf("Delete worktree %s at %s? Ignored files are deleted too. ", name, wt.Path)
 	}
 	var lost []string
 	if p.Changed > 0 {
@@ -120,11 +125,23 @@ func DeletePrompt(wt Worktree, p DeletePlan) string {
 	if p.Unreachable > 0 {
 		lost = append(lost, plural(p.Unreachable, "commit", "commits"))
 	}
-	text := label + " has " + strings.Join(lost, " and ")
+	text := name + " has " + strings.Join(lost, " and ")
 	if p.Unreachable > 0 {
 		text += " that no branch contains"
 	}
 	return text + ". They will be lost. Ignored files are deleted too. "
+}
+
+// label returns the branch of wt, or the first 7 characters of its head if
+// it is detached.
+func label(wt Worktree) string {
+	if wt.Branch != "" {
+		return wt.Branch
+	}
+	if len(wt.Head) > 7 {
+		return wt.Head[:7]
+	}
+	return wt.Head
 }
 
 func plural(n int, one, many string) string {

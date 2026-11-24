@@ -446,3 +446,47 @@ func TestPruneEOFCancels(t *testing.T) {
 		t.Errorf("entry vanished:\n%s", out)
 	}
 }
+
+// nestedRepo adds a worktree "outer" and a worktree "nested" inside it. An
+// ignore rule hides the nested folder, so the status of outer is clean.
+func nestedRepo(t *testing.T) (repo *testrepo.Repo, outer, nested string) {
+	t.Helper()
+	repo = testrepo.New(t)
+	outer = repo.AddWorktree(t, "outer")
+	if err := os.WriteFile(filepath.Join(outer, ".gitignore"), []byte("nested/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git(t, outer, "add", ".gitignore")
+	repo.Git(t, outer, "commit", "-m", "ignore nested")
+	nested = filepath.Join(outer, "nested")
+	repo.Git(t, repo.Dir, "worktree", "add", "-b", "nested", nested)
+	return repo, outer, nested
+}
+
+func TestRmNestedRefused(t *testing.T) {
+	for _, args := range [][]string{{"rm", "outer"}, {"rm", "outer", "--force"}} {
+		isolate(t)
+		repo, outer, nested := nestedRepo(t)
+		_, _, err := runIn(t, repo.Dir, "y\n", true, args...)
+		if err == nil || err.Error() != "contains worktree nested: delete it first" {
+			t.Errorf("%v: err = %v", args, err)
+		}
+		if !exists(outer) || !exists(nested) {
+			t.Errorf("%v: outer exists %v, nested exists %v", args, exists(outer), exists(nested))
+		}
+	}
+}
+
+// From inside a nested worktree, the outer worktree holds the current
+// directory too.
+func TestRmOuterFromNested(t *testing.T) {
+	isolate(t)
+	_, outer, nested := nestedRepo(t)
+	_, _, err := runIn(t, nested, "yes\n", true, "rm", "outer", "--force")
+	if err == nil {
+		t.Error("err = nil")
+	}
+	if !exists(outer) || !exists(nested) {
+		t.Errorf("outer exists %v, nested exists %v", exists(outer), exists(nested))
+	}
+}
