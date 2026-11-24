@@ -35,7 +35,10 @@ const (
 // the color profile.
 var renderer = lipgloss.NewRenderer(os.Stderr)
 
-var dim = renderer.NewStyle().Faint(true)
+var (
+	dim   = renderer.NewStyle().Faint(true)
+	green = renderer.NewStyle().Foreground(lipgloss.Color("2"))
+)
 
 // cell is one table cell. Text is plain. Dim draws it faint.
 type cell struct {
@@ -297,28 +300,41 @@ func (m Model) table(w, extra int) []string {
 	return lines
 }
 
-// branchCell draws the name in width columns. The folder note is dim. A
-// name that does not fit ends with "…". The cut removes the folder note
-// first, then shortens the branch and keeps the "[locked]" and "[missing]" marks.
+// branchCell draws the name in width columns. The folder note is dim and the
+// merged mark is green. A name that does not fit ends with "…". The cut
+// removes the folder note first, then shortens the branch and keeps the
+// marks: " ✓ merged", "[locked]", and "[missing]".
 func branchCell(r status.Row, width int) string {
-	label, note := status.Label(r), status.FolderNote(r)
+	plain, note, marks := status.Plain(r), status.FolderNote(r), status.Marks(r)
+	pw, mw := lipgloss.Width(plain), lipgloss.Width(marks)
+	styled := styleMarks(marks)
 	full := status.Name(r)
 	switch {
-	case lipgloss.Width(full) <= width && note == "":
-		return pad(label, width)
 	case lipgloss.Width(full) <= width:
-		return label + " " + dim.Render(note) + strings.Repeat(" ", width-lipgloss.Width(full))
-	case lipgloss.Width(label) < width:
-		// The cut keeps width-1 columns, so all of the label stays.
-		return pad(ellipsize(full, width), width)
+		s := plain
+		if note != "" {
+			s += " " + dim.Render(note)
+		}
+		return s + styled + strings.Repeat(" ", width-lipgloss.Width(full))
+	case pw+mw <= width:
+		// Part of the folder note fits, if it has room for " (…".
+		tail := ""
+		if extra := width - pw - mw; note != "" && extra >= 3 {
+			tail = ellipsize(" "+note, extra)
+		}
+		return pad(plain+tail, width-mw) + styled
+	case width-mw >= 2:
+		return pad(ellipsize(plain, width-mw), width-mw) + styled
 	}
-	plain := r
-	plain.WT.Locked, plain.WT.Prunable = false, false
-	marks := strings.TrimPrefix(label, status.Label(plain))
-	if room := width - lipgloss.Width(marks); room >= 2 {
-		return pad(ellipsize(status.Label(plain), room)+marks, width)
+	return pad(ellipsize(plain+marks, width), width)
+}
+
+// styleMarks draws the merged mark green. The other marks stay plain.
+func styleMarks(marks string) string {
+	if rest, ok := strings.CutPrefix(marks, status.MergedMark); ok {
+		return green.Render(status.MergedMark) + rest
 	}
-	return pad(ellipsize(label, width), width)
+	return marks
 }
 
 // joinRow joins the branch cell and the shown cells with two spaces. The

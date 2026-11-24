@@ -160,7 +160,7 @@ func fixedRows(now time.Time) []Row {
 			Changed: 4, ChangedOK: true, Ahead: 2, Behind: 31, DistOK: true,
 			LastCommit: now.Add(-21 * 24 * time.Hour), CommitOK: true, Size: 1503238554, SizeState: disk.SizeCached},
 		{WT: git.Worktree{Path: "/w/feat", Branch: "feat", Locked: true},
-			Changed: 0, ChangedOK: true, LastCommit: now.Add(-2 * time.Hour), CommitOK: true,
+			Changed: 0, ChangedOK: true, Merged: true, MergedOK: true, LastCommit: now.Add(-2 * time.Hour), CommitOK: true,
 			Size: 2048, SizeState: disk.SizeFresh},
 		{WT: git.Worktree{Path: "/w/gone", Branch: "gone", Prunable: true}},
 		{WT: git.Worktree{Path: "/w/det", Head: "abcdef1234567", Detached: true}, Changed: 1, ChangedOK: true},
@@ -173,7 +173,7 @@ func TestTable(t *testing.T) {
 	Table(&buf, fixedRows(now), "origin/master", now)
 	out := buf.String()
 	for _, s := range []string{"origin/master", "● master", "4 files", "↑2 ↓31", "~1.4 GB", "3 weeks ago",
-		"[locked]", "[missing]", "—", "clean", "2 KB", "abcdef1", "feat"} {
+		"feat ✓ merged [locked]", "[missing]", "—", "clean", "2 KB", "abcdef1", "feat"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("table lacks %q:\n%s", s, out)
 		}
@@ -225,6 +225,12 @@ func TestJSON(t *testing.T) {
 	if got[2]["changed"] != nil || got[2]["last_commit"] != nil || got[2]["size_bytes"] != nil || got[2]["prunable"] != true {
 		t.Errorf("row 2: %v", got[2])
 	}
+	if got[1]["merged"] != true || got[0]["merged"] != nil {
+		t.Errorf("merged: row 0 %v, row 1 %v", got[0]["merged"], got[1]["merged"])
+	}
+	if _, ok := got[0]["merged"]; !ok {
+		t.Error("no merged field")
+	}
 	if got[0]["base"] != "origin/master" {
 		t.Errorf("base: %v", got[0]["base"])
 	}
@@ -240,7 +246,9 @@ func TestCellText(t *testing.T) {
 		{Label(rows[0]), "master"},
 		{FolderNote(rows[0]), "(main)"},
 		{Name(rows[0]), "master (main)"},
-		{Label(rows[1]), "feat [locked]"},
+		{Label(rows[1]), "feat ✓ merged [locked]"},
+		{Marks(rows[1]), " ✓ merged [locked]"},
+		{Marks(rows[0]), ""},
 		{FolderNote(rows[1]), ""},
 		{Name(rows[2]), "gone [missing]"},
 		{Name(rows[3]), "abcdef1"},
@@ -258,5 +266,41 @@ func TestCellText(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("case %d: got %q, want %q", i, c.got, c.want)
 		}
+	}
+}
+
+// The merged mark comes after the folder note and before the other marks.
+func TestNameOrder(t *testing.T) {
+	r := Row{WT: git.Worktree{Path: "/w/dir", Branch: "feat", Locked: true}, Merged: true, MergedOK: true}
+	if got, want := Name(r), "feat (dir) ✓ merged [locked]"; got != want {
+		t.Errorf("Name = %q, want %q", got, want)
+	}
+	r.MergedOK = false
+	if got, want := Name(r), "feat (dir) [locked]"; got != want {
+		t.Errorf("not known: Name = %q, want %q", got, want)
+	}
+}
+
+// LoadAll finds a squash merge and skips the main worktree.
+func TestLoadAllMerged(t *testing.T) {
+	repo, r, _ := setup(t)
+	repo.Git(t, repo.Dir, "merge", "--squash", "feat")
+	repo.Git(t, repo.Dir, "commit", "-m", "squash feat")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	ctx := context.Background()
+	wts, _ := r.Worktrees(ctx)
+	cache := disk.LoadCache(filepath.Join(t.TempDir(), "sizes.json"))
+	o := Options{Base: "origin/master", TTL: time.Hour, Cwd: repo.Dir, Now: time.Now()}
+	rows := LoadAll(ctx, r, wts, cache, repo.Dir, o)
+	if f := find(t, rows, "feat"); !f.Merged || !f.MergedOK || f.Ahead == 0 {
+		t.Errorf("feat row: %+v", f)
+	}
+	if m := find(t, rows, "master"); m.MergedOK {
+		t.Errorf("main row has a merged value: %+v", m)
+	}
+	o.Base = ""
+	rows = LoadAll(ctx, r, wts, cache, repo.Dir, o)
+	if f := find(t, rows, "feat"); f.MergedOK {
+		t.Errorf("no base: %+v", f)
 	}
 }

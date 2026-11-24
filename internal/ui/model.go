@@ -65,9 +65,9 @@ type Model struct {
 	rows    []status.Row // sorted with status.Sort
 
 	// The wait maps hold the paths whose command runs now.
-	changedWait, distWait, commitWait map[string]bool
-	sizeBusy                          map[string]bool
-	sizeWait                          []string // size commands that wait for a free slot
+	changedWait, distWait, mergedWait, commitWait map[string]bool
+	sizeBusy                                      map[string]bool
+	sizeWait                                      []string // size commands that wait for a free slot
 
 	fresh         bool // the next load runs du for every row
 	fetchedOnLoad bool
@@ -97,6 +97,7 @@ func New(d Deps) Model {
 		d:           d,
 		changedWait: map[string]bool{},
 		distWait:    map[string]bool{},
+		mergedWait:  map[string]bool{},
 		commitWait:  map[string]bool{},
 		sizeBusy:    map[string]bool{},
 	}
@@ -150,6 +151,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r := m.row(msg.path); r != nil && m.base != "" {
 			r.Ahead, r.Behind, r.DistOK = msg.ahead, msg.behind, msg.err == nil
 		}
+	case mergedMsg:
+		delete(m.mergedWait, msg.path)
+		if r := m.row(msg.path); r != nil && m.base != "" && !r.WT.IsMain {
+			r.Merged, r.MergedOK = msg.merged, msg.err == nil && msg.ok
+		}
 	case commitMsg:
 		delete(m.commitWait, msg.path)
 		if r := m.row(msg.path); r != nil {
@@ -195,7 +201,7 @@ func (m Model) setWorktrees(msg worktreesMsg) (tea.Model, tea.Cmd) {
 	m.fresh = false
 	now := m.d.Now()
 	cur := git.Current(msg.wts, m.d.Cwd)
-	m.changedWait, m.distWait, m.commitWait = map[string]bool{}, map[string]bool{}, map[string]bool{}
+	m.changedWait, m.distWait, m.mergedWait, m.commitWait = map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 
 	var keep []string
 	for _, p := range m.sizeWait {
@@ -217,7 +223,7 @@ func (m Model) setWorktrees(msg worktreesMsg) (tea.Model, tea.Cmd) {
 			continue
 		}
 		if m.base == "" {
-			r.DistOK = false
+			r.DistOK, r.MergedOK = false, false
 		}
 		e, ok := m.d.Cache.Get(m.d.Repo, w.Path)
 		bytes, state, runDu := disk.Decide(e, ok, m.d.Cfg.SizeTTL, now, fresh)
@@ -258,7 +264,9 @@ func containsPath(wts []git.Worktree, path string) bool {
 	return false
 }
 
-// startDistances starts a distance command for each row with a folder.
+// startDistances starts a distance command for each row with a folder, and
+// a merged command for each of these rows that is not the main worktree.
+// Both answers depend on the base.
 func (m *Model) startDistances() tea.Cmd {
 	if m.base == "" {
 		return nil
@@ -270,6 +278,10 @@ func (m *Model) startDistances() tea.Cmd {
 		}
 		m.distWait[r.WT.Path] = true
 		cmds = append(cmds, distCmd(m.d.Git, r.WT.Path, m.base))
+		if !r.WT.IsMain {
+			m.mergedWait[r.WT.Path] = true
+			cmds = append(cmds, mergedCmd(m.d.Git, r.WT.Path, m.base))
+		}
 	}
 	return tea.Batch(cmds...)
 }

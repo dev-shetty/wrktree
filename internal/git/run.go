@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -35,7 +36,19 @@ func Open(dir string) (Runner, error) {
 // Run runs git with args and returns stdout without the trailing newline.
 // The error text includes stderr.
 func (r Runner) Run(ctx context.Context, args ...string) (string, error) {
+	return r.run(ctx, nil, args...)
+}
+
+// RunInput is Run with stdin as the input of git.
+func (r Runner) RunInput(ctx context.Context, stdin string, args ...string) (string, error) {
+	return r.run(ctx, strings.NewReader(stdin), args...)
+}
+
+func (r Runner) run(ctx context.Context, stdin io.Reader, args ...string) (string, error) {
 	cmd := r.command(ctx, args...)
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -88,7 +101,7 @@ func readOnly(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "status", "rev-list", "log", "rev-parse", "symbolic-ref":
+	case "status", "rev-list", "log", "rev-parse", "symbolic-ref", "diff", "merge-base":
 		return true
 	case "worktree":
 		return len(args) > 1 && args[1] == "list"

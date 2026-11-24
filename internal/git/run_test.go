@@ -24,6 +24,8 @@ func TestCommandFlags(t *testing.T) {
 		{[]string{"log", "-1"}, true},
 		{[]string{"rev-parse", "--git-common-dir"}, true},
 		{[]string{"symbolic-ref", "--short", "refs/remotes/origin/HEAD"}, true},
+		{[]string{"diff", "a", "HEAD"}, true},
+		{[]string{"merge-base", "origin/master", "HEAD"}, true},
 		{[]string{"worktree", "list", "--porcelain"}, true},
 		{[]string{"worktree", "remove", "/r/x"}, false},
 		{[]string{"worktree", "prune", "-v"}, false},

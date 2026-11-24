@@ -109,3 +109,95 @@ func (r Runner) FetchBase(ctx context.Context, base string) error {
 	_, err = r.Run(ctx, "fetch", remote, strings.TrimPrefix(base, remote+"/"))
 	return err
 }
+
+// mergedScanLimit is the largest count of base commits that Merged reads.
+// A var, so that a test can make it small.
+var mergedScanLimit = 2000
+
+// diffFlags make the diff text independent of the git configuration.
+var diffFlags = []string{"--no-color", "--no-ext-diff", "--no-textconv"}
+
+// Merged reports if the base branch already contains the changes of the
+// worktree at path. ok is false when the answer is not known.
+//
+// HEAD is merged if it is an ancestor of base, if it adds no change to the
+// merge base, or if a commit on base since the merge base has the same patch
+// id as the whole change of HEAD. The last test finds a squash merge. Merged
+// runs only commands that read, and it writes no objects.
+func (r Runner) Merged(ctx context.Context, path, base string) (merged, ok bool, err error) {
+	g := r.In(path)
+	head, err := g.Run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return false, false, err
+	}
+	tip, err := g.Run(ctx, "rev-parse", base)
+	if err != nil {
+		return false, false, err
+	}
+	if head == tip {
+		return false, true, nil
+	}
+	mb, err := g.Run(ctx, "merge-base", base, "HEAD")
+	if err != nil {
+		return false, false, err
+	}
+	if mb == head {
+		return true, true, nil
+	}
+	diff, err := g.Run(ctx, append(append([]string{"diff"}, diffFlags...), mb, "HEAD")...)
+	if err != nil {
+		return false, false, err
+	}
+	if strings.TrimSpace(diff) == "" {
+		return true, true, nil
+	}
+	out, err := g.Run(ctx, "rev-list", "--count", "--no-merges", mb+".."+base)
+	if err != nil {
+		return false, false, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return false, false, err
+	}
+	if n > mergedScanLimit {
+		return false, false, nil
+	}
+	if n == 0 {
+		return false, true, nil
+	}
+	want, err := g.patchIDs(ctx, diff+"\n")
+	if err != nil || len(want) == 0 {
+		return false, false, err
+	}
+	logArgs := append(append([]string{"log", "-p", "--no-merges", "--format=commit %H"}, diffFlags...), mb+".."+base)
+	log, err := g.Run(ctx, logArgs...)
+	if err != nil {
+		return false, false, err
+	}
+	have, err := g.patchIDs(ctx, log+"\n")
+	if err != nil {
+		return false, false, err
+	}
+	for _, id := range have {
+		if id == want[0] {
+			return true, true, nil
+		}
+	}
+	return false, true, nil
+}
+
+// patchIDs returns the stable patch ids of the patches in text. git
+// patch-id reads only stdin.
+func (r Runner) patchIDs(ctx context.Context, text string) ([]string, error) {
+	out, err := r.RunInput(ctx, text, "patch-id", "--stable")
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) > 0 {
+			ids = append(ids, f[0])
+		}
+	}
+	return ids, nil
+}

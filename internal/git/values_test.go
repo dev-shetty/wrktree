@@ -173,3 +173,136 @@ func TestFetchBaseTimeout(t *testing.T) {
 		t.Errorf("ssh child still runs: %s", out)
 	}
 }
+
+// commitText writes text to file in dir, then stages and commits it.
+func commitText(t *testing.T, repo *testrepo.Repo, dir, file, text string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git(t, dir, "add", file)
+	repo.Git(t, dir, "commit", "-m", "write "+file)
+}
+
+// squash makes one squash commit of branch on master and pushes it.
+func squash(t *testing.T, repo *testrepo.Repo, branch string) {
+	t.Helper()
+	repo.Git(t, repo.Dir, "merge", "--squash", branch)
+	repo.Git(t, repo.Dir, "commit", "-m", "squash "+branch)
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+}
+
+func merged(t *testing.T, repo *testrepo.Repo, path string) (bool, bool) {
+	t.Helper()
+	m, ok, err := open(t, repo.Dir).Merged(context.Background(), path, "origin/master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, ok
+}
+
+func TestMergedSquash(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, feat, "f1.txt")
+	commitText(t, repo, feat, "README.md", "changed\n")
+	squash(t, repo, "feat")
+	if m, ok := merged(t, repo, feat); !m || !ok {
+		t.Errorf("squash merge: merged = %v, ok = %v; want true, true", m, ok)
+	}
+	if ahead, _, err := open(t, repo.Dir).Distance(context.Background(), feat, "origin/master"); err != nil || ahead == 0 {
+		t.Errorf("ahead = %d, err = %v; want ahead > 0", ahead, err)
+	}
+}
+
+func TestMergedMergeCommit(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, feat, "f1.txt")
+	repo.Commit(t, repo.Dir, "m1.txt")
+	repo.Git(t, repo.Dir, "merge", "--no-ff", "-m", "merge feat", "feat")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	if m, ok := merged(t, repo, feat); !m || !ok {
+		t.Errorf("merge commit: merged = %v, ok = %v; want true, true", m, ok)
+	}
+}
+
+func TestMergedUnmerged(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, feat, "f1.txt")
+	repo.Commit(t, repo.Dir, "m1.txt")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	if m, ok := merged(t, repo, feat); m || !ok {
+		t.Errorf("unmerged: merged = %v, ok = %v; want false, true", m, ok)
+	}
+}
+
+// A squash merge stays merged when master changes the same lines later.
+func TestMergedSquashChangedLater(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	commitText(t, repo, feat, "a.txt", "one\n")
+	squash(t, repo, "feat")
+	commitText(t, repo, repo.Dir, "a.txt", "two\n")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	if m, ok := merged(t, repo, feat); !m || !ok {
+		t.Errorf("changed later: merged = %v, ok = %v; want true, true", m, ok)
+	}
+}
+
+func TestMergedAtBase(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	if m, ok := merged(t, repo, feat); m || !ok {
+		t.Errorf("at base: merged = %v, ok = %v; want false, true", m, ok)
+	}
+}
+
+// A branch with no commits of its own that is behind the base is merged.
+func TestMergedBehindOnly(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, repo.Dir, "m1.txt")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	if m, ok := merged(t, repo, feat); !m || !ok {
+		t.Errorf("behind only: merged = %v, ok = %v; want true, true", m, ok)
+	}
+}
+
+// Too many base commits to scan: the answer is not known.
+func TestMergedScanLimit(t *testing.T) {
+	old := mergedScanLimit
+	mergedScanLimit = 1
+	t.Cleanup(func() { mergedScanLimit = old })
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, feat, "f1.txt")
+	repo.Commit(t, repo.Dir, "m1.txt")
+	repo.Commit(t, repo.Dir, "m2.txt")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	if _, ok := merged(t, repo, feat); ok {
+		t.Error("scan limit: ok = true, want false")
+	}
+}
+
+// Merged writes nothing: the object count stays the same.
+func TestMergedWritesNoObjects(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	commitText(t, repo, feat, "a.txt", "one\n")
+	squash(t, repo, "feat")
+	before := repo.Git(t, repo.Dir, "count-objects", "-v")
+	merged(t, repo, feat)
+	if after := repo.Git(t, repo.Dir, "count-objects", "-v"); after != before {
+		t.Errorf("objects changed:\n%s\n%s", before, after)
+	}
+}
+
+func TestRunInput(t *testing.T) {
+	repo := testrepo.New(t)
+	out, err := open(t, repo.Dir).RunInput(context.Background(), "hello\n", "hash-object", "--stdin")
+	if err != nil || len(out) != 40 {
+		t.Errorf("RunInput = %q, %v", out, err)
+	}
+}

@@ -31,6 +31,8 @@ type Row struct {
 	ChangedOK     bool
 	Ahead, Behind int
 	DistOK        bool
+	Merged        bool // the base contains the changes of the branch
+	MergedOK      bool
 	LastCommit    time.Time
 	CommitOK      bool
 	Size          int64
@@ -81,6 +83,13 @@ func LoadAll(ctx context.Context, r git.Runner, wts []git.Worktree, cache *disk.
 					row.Ahead, row.Behind, row.DistOK = a, b, true
 				}
 			})
+			if !w.IsMain {
+				start(func() {
+					if m, ok, err := r.Merged(ctx, w.Path, o.Base); err == nil && ok {
+						row.Merged, row.MergedOK = m, true
+					}
+				})
+			}
 		}
 		start(func() {
 			if t, err := r.LastCommit(ctx, w.Path); err == nil {
@@ -164,9 +173,11 @@ const (
 	Unavailable = "—"
 )
 
-// Label is the branch name, or the short hash of a detached HEAD, with the
-// "[locked]" and "[missing]" marks.
-func Label(r Row) string {
+// MergedMark is the mark of a branch that the base already contains.
+const MergedMark = " ✓ merged"
+
+// Plain is the branch name, or the short hash of a detached HEAD, with no marks.
+func Plain(r Row) string {
 	w := r.WT
 	n := w.Branch
 	if w.Detached || n == "" {
@@ -175,14 +186,27 @@ func Label(r Row) string {
 			n = n[:7]
 		}
 	}
-	if w.Locked {
+	return n
+}
+
+// Marks is the text after the name: MergedMark, then " [locked]" and
+// " [missing]". It is "" for a row with no marks.
+func Marks(r Row) string {
+	var n string
+	if r.MergedOK && r.Merged {
+		n += MergedMark
+	}
+	if r.WT.Locked {
 		n += " [locked]"
 	}
-	if w.Prunable {
+	if r.WT.Prunable {
 		n += " [missing]"
 	}
 	return n
 }
+
+// Label is the Plain name followed by the Marks.
+func Label(r Row) string { return Plain(r) + Marks(r) }
 
 // FolderNote is the folder name in parentheses if it is different from the
 // branch name. Otherwise it is "".
@@ -195,12 +219,14 @@ func FolderNote(r Row) string {
 	return ""
 }
 
-// Name is the Label followed by the FolderNote.
+// Name is the Plain name, the FolderNote, and the Marks. The ls table and
+// the screen both use it.
 func Name(r Row) string {
+	n := Plain(r)
 	if f := FolderNote(r); f != "" {
-		return Label(r) + " " + f
+		n += " " + f
 	}
-	return Label(r)
+	return n + Marks(r)
 }
 
 // ChangedText is the CHANGES cell, for example "clean" or "4 files".
@@ -289,6 +315,7 @@ type jsonRow struct {
 	Changed    *int       `json:"changed"`
 	Ahead      *int       `json:"ahead"`
 	Behind     *int       `json:"behind"`
+	Merged     *bool      `json:"merged"`
 	Base       string     `json:"base"`
 	LastCommit *time.Time `json:"last_commit"`
 	SizeBytes  *int64     `json:"size_bytes"`
@@ -309,6 +336,10 @@ func JSON(w io.Writer, rows []Row, base string) error {
 		}
 		if r.DistOK {
 			j.Ahead, j.Behind = &r.Ahead, &r.Behind
+		}
+		if r.MergedOK {
+			m := r.Merged
+			j.Merged = &m
 		}
 		if r.CommitOK {
 			t := r.LastCommit

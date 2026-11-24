@@ -7,11 +7,11 @@
 ```
  wrktree · levelsfyi-mono                                  10 worktrees · 14.2 GB
 
-   BRANCH                              CHANGES    origin/master   SIZE     LAST COMMIT
- ● master                              clean      ↑0 ↓3           3.1 GB   2 hours ago
- › eng-6201-onboarding-v2-alerts       4 files    ↑2 ↓31          1.4 GB   3 weeks ago
-   eng-6458-bugsink-key-flows          clean      ↑0 ↓12          1.2 GB   9 days ago
-   eng-6882-tp-self-serve-ui           12 files   ↑5 ↓0           …        1 day ago
+   BRANCH                               CHANGES    origin/master   SIZE     LAST COMMIT
+ ● master                               clean      ↑0 ↓3           3.1 GB   2 hours ago
+ › eng-6201-onboarding-v2-alerts        4 files    ↑2 ↓31          1.4 GB   3 weeks ago
+   eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
+   eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
  enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
@@ -21,6 +21,7 @@
 - `CHANGES` is the number of changed files. Untracked files count.
 - `↑` is the number of commits that the worktree has and the base branch does not have.
 - `↓` is the number of commits that the worktree is behind the base branch.
+- `✓ merged` marks a branch that the base branch already contains. See [Merged branches](#merged-branches).
 - `…` shows a value that is not available yet.
 - The main worktree is always the first row. The other rows sort by the time of the last commit, newest first.
 
@@ -97,6 +98,27 @@ The screen draws on stderr. Stdout carries only the path for a directory change.
 
 The git commands that only read run with `git --no-optional-locks`. Thus the background `git status` does not take `index.lock`, and a commit in a different terminal does not fail.
 
+## Merged branches
+
+A branch that is squash-merged keeps its own commits. Thus its `↑` count stays above 0 after the merge. The `✓ merged` mark shows that the base branch already contains the changes of the branch.
+
+`wrktree` compares `HEAD` of each worktree with the base branch. It finds the merge base with `git merge-base`. A branch is merged if one of these conditions is true:
+
+1. `HEAD` is an ancestor of the base branch. This is the case after a normal merge or a fast-forward merge.
+2. `git diff <merge-base> HEAD` is empty. The branch has no changes of its own.
+3. One commit on the base branch after the merge base has the same `git patch-id --stable` as the full diff of the branch. This is the case after a squash merge.
+
+More rules:
+
+- A worktree at the same commit as the base branch is not merged. It has nothing to merge.
+- The main worktree never shows the mark.
+- If the base branch has more than 2000 commits after the merge base, `wrktree` does not do the third test. The mark does not show.
+- The mark is green in the screen. When the branch name is cut for the width, the mark stays.
+- All of these git commands only read. They do not write objects to the repository.
+- The answer depends on the base branch. Thus `f` and `r` calculate it again.
+
+The third test can miss a squash merge. This occurs when the base branch changed the lines around the change before the squash commit.
+
 ## Subcommands
 
 | Command | Action |
@@ -116,7 +138,7 @@ The git commands that only read run with `git --no-optional-locks`. Thus the bac
 
 `wrktree ls` flags:
 
-- `--json` prints the rows as JSON.
+- `--json` prints the rows as JSON. The `merged` field is `true` or `false`, or `null` if the answer is not known. It is `null` for the main worktree.
 - `--fetch` fetches the base branch first. Without it, `ls` does not use the network.
 - `--fresh` measures all disk sizes again.
 

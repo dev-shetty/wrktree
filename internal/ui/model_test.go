@@ -768,3 +768,67 @@ func TestCursorStartsOnCurrent(t *testing.T) {
 		t.Error("a reload moves the cursor back to the current row")
 	}
 }
+
+// TestMergedMark: the mark shows after mergedMsg, never on the main row.
+func TestMergedMark(t *testing.T) {
+	m := loaded(t)
+	if m.mergedWait[mainPath] || !m.mergedWait[alertPath] || !m.mergedWait[flowsPath] {
+		t.Errorf("merged waits: %v", m.mergedWait)
+	}
+	m, _ = send(t, m, mergedMsg{path: alertPath, merged: true, ok: true})
+	m, _ = send(t, m, mergedMsg{path: flowsPath, merged: false, ok: true})
+	m, _ = send(t, m, mergedMsg{path: mainPath, merged: true, ok: true})
+	v := m.View()
+	if l := lineWith(t, v, "eng-6201"); !strings.Contains(l, "eng-6201-onboarding-v2-alerts ✓ merged") {
+		t.Errorf("merged row: %q", l)
+	}
+	if l := lineWith(t, v, "eng-6458"); strings.Contains(l, "merged") {
+		t.Errorf("unmerged row: %q", l)
+	}
+	if l := lineWith(t, v, "master"); strings.Contains(l, "merged") {
+		t.Errorf("main row: %q", l)
+	}
+	// A cut name keeps the mark.
+	m, _ = send(t, m, tea.WindowSizeMsg{Width: 40, Height: 20})
+	if l := lineWith(t, m.View(), "4 files"); !strings.Contains(l, "eng… ✓ merged") {
+		t.Errorf("cut row must keep the mark: %q", l)
+	}
+	// A fetch and r start the merged commands again.
+	m, _ = keys(t, m, "f")
+	m, _ = send(t, m, fetchMsg{})
+	if !m.mergedWait[alertPath] {
+		t.Error("no merged command after the fetch")
+	}
+	m, _ = keys(t, m, "r")
+	m, _ = send(t, m, worktreesMsg{wts: threeWorktrees(), base: "origin/master"})
+	if !m.mergedWait[alertPath] || m.mergedWait[mainPath] {
+		t.Errorf("after r: merged waits %v", m.mergedWait)
+	}
+}
+
+func TestMergedMarkIsGreen(t *testing.T) {
+	old := renderer.ColorProfile()
+	renderer.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { renderer.SetColorProfile(old) })
+	m := loaded(t)
+	m, _ = send(t, m, mergedMsg{path: alertPath, merged: true, ok: true})
+	if l := lineWith(t, m.View(), "eng-6201"); !strings.Contains(l, "\x1b[32m ✓ merged") {
+		t.Errorf("merged mark is not green: %q", l)
+	}
+}
+
+func TestMergedCmd(t *testing.T) {
+	repo := testrepo.New(t)
+	feat := repo.AddWorktree(t, "feat")
+	repo.Commit(t, feat, "a.txt")
+	repo.Git(t, repo.Dir, "merge", "--squash", "feat")
+	repo.Git(t, repo.Dir, "commit", "-m", "squash feat")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	r, err := git.Open(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := mergedCmd(r, feat, "origin/master")().(mergedMsg); c.err != nil || !c.merged || !c.ok || c.path != feat {
+		t.Errorf("merged: %+v", c)
+	}
+}

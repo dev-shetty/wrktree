@@ -104,11 +104,11 @@ If the current directory is not in a git repository, each command prints
 ```
  wrktree · levelsfyi-mono                                  10 worktrees · 14.2 GB
 
-   BRANCH                              CHANGES    origin/master   SIZE     LAST COMMIT
- ● master                              clean      ↑0 ↓3           3.1 GB   2 hours ago
- › eng-6201-onboarding-v2-alerts       4 files    ↑2 ↓31          1.4 GB   3 weeks ago
-   eng-6458-bugsink-key-flows          clean      ↑0 ↓12          1.2 GB   9 days ago
-   eng-6882-tp-self-serve-ui           12 files   ↑5 ↓0           …        1 day ago
+   BRANCH                               CHANGES    origin/master   SIZE     LAST COMMIT
+ ● master                               clean      ↑0 ↓3           3.1 GB   2 hours ago
+ › eng-6201-onboarding-v2-alerts        4 files    ↑2 ↓31          1.4 GB   3 weeks ago
+   eng-6458-bugsink-key-flows ✓ merged  clean      ↑1 ↓12          1.2 GB   9 days ago
+   eng-6882-tp-self-serve-ui            12 files   ↑5 ↓0           …        1 day ago
 
  enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
@@ -120,6 +120,10 @@ If the current directory is not in a git repository, each command prints
 - A detached worktree shows the short commit hash in place of the branch.
 - If the branch name does not match the folder name, the folder name shows
   dimmed after the branch name.
+- A branch that the base branch already contains shows a green `✓ merged`
+  mark after the branch name and the folder name, before `[locked]` and
+  `[missing]`. When the name is cut for the width, the marks stay. The main
+  worktree never shows the mark.
 
 Keys:
 
@@ -151,6 +155,23 @@ worktree. (Builder call.)
 | Distance from base | `git rev-list --left-right --count <base>...HEAD` |
 | Last commit time | `git log -1 --format=%ct` |
 | Disk size | `du -sk <path>` |
+| Merged into base | Read-only git commands in the worktree. See below. |
+
+Merged into base: the tool compares `HEAD` with `<base>`. It does not do this
+for the main worktree, for a missing folder, or when there is no base.
+
+1. If `HEAD` and `<base>` are the same commit, the branch is not merged.
+2. `mb = git merge-base <base> HEAD`. If `mb` is `HEAD`, the branch is merged.
+3. If `git diff <mb> HEAD` is empty, the branch is merged.
+4. If `git rev-list --count --no-merges <mb>..<base>` is more than 2000, the
+   answer is not known.
+5. The tool calculates `git patch-id --stable` of the diff of step 3. It also
+   calculates the patch ids of `git log -p --no-merges <mb>..<base>`. If the
+   list has the patch id of the diff, the branch is merged (a squash merge).
+   If not, the branch is not merged.
+
+These commands only read, and they write no objects. `ls --json` gives the
+answer in the field `merged`: `true`, `false`, or `null` if not known.
 
 The list of worktrees loads first, and the table shows immediately. The other
 values load in parallel, one goroutine for each worktree and value. A limit of

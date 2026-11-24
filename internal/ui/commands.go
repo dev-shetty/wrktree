@@ -35,6 +35,12 @@ type distMsg struct {
 	err           error
 }
 
+type mergedMsg struct {
+	path       string
+	merged, ok bool
+	err        error
+}
+
 type commitMsg struct {
 	path string
 	t    time.Time
@@ -76,6 +82,13 @@ func distCmd(r git.Runner, path, base string) tea.Cmd {
 	return func() tea.Msg {
 		a, b, err := r.Distance(context.Background(), path, base)
 		return distMsg{path: path, ahead: a, behind: b, err: err}
+	}
+}
+
+func mergedCmd(r git.Runner, path, base string) tea.Cmd {
+	return func() tea.Msg {
+		merged, ok, err := r.Merged(context.Background(), path, base)
+		return mergedMsg{path: path, merged: merged, ok: ok, err: err}
 	}
 }
 

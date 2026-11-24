@@ -114,6 +114,33 @@ func TestLsJSON(t *testing.T) {
 	}
 }
 
+// ls shows the merged mark of a squash-merged branch, in text and in JSON.
+func TestLsMerged(t *testing.T) {
+	repo, feat := twoWorktrees(t)
+	repo.Commit(t, feat, "f1.txt")
+	repo.Git(t, repo.Dir, "merge", "--squash", "feat-a")
+	repo.Git(t, repo.Dir, "commit", "-m", "squash feat-a")
+	repo.Git(t, repo.Dir, "push", "origin", "master")
+	out, _, err := run(t, repo.Dir, "ls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "feat-a ✓ merged") || strings.Contains(out, "master ✓") {
+		t.Errorf("merged mark:\n%s", out)
+	}
+	out, _, err = run(t, repo.Dir, "ls", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if rows[1]["merged"] != true || rows[0]["merged"] != nil {
+		t.Errorf("rows: %v", rows)
+	}
+}
+
 func TestLsFetch(t *testing.T) {
 	repo, _ := twoWorktrees(t)
 	_, stderr, err := run(t, repo.Dir, "ls", "--fetch", "--fresh")
