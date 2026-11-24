@@ -1,5 +1,7 @@
 # wrktree
 
+[![CI](https://github.com/dev-shetty/wrktree/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-shetty/wrktree/actions/workflows/ci.yml)
+
 See all git worktrees of a repository in one table. Switch, sync, or delete a worktree with one key.
 
 ```
