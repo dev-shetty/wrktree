@@ -13,7 +13,7 @@
    eng-6458-bugsink-key-flows          clean      ↑0 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui           12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · d delete · p prune · f fetch · / filter · q quit
+ enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory.
@@ -85,7 +85,8 @@ If stdin or stderr is not a terminal, `wrktree` prints the table one time, as `w
 | `↑` `↓` `j` `k` | Move the cursor. |
 | `enter` | Change to the worktree and quit. |
 | `o` | Quit, then run the open command on the worktree. |
-| `d` | Delete the worktree, after a prompt. |
+| `d` | Delete the worktree. The branch stays. A clean worktree is deleted immediately, with no prompt. |
+| `D` | Delete the worktree, then delete its branch with `git branch -d`. |
 | `p` | Show the stale worktree entries, then prune them after a prompt. |
 | `f` | Fetch the base branch again, then calculate the distances again. |
 | `/` | Filter the rows by branch name or folder name. |
@@ -125,22 +126,28 @@ If the current directory is not in a git repository, each command prints `wrktre
 
 ## Delete
 
-CAUTION: `git worktree remove` also deletes ignored files, for example `.env.local`. `wrktree` cannot tell these files apart from `node_modules`. Thus each delete prompt says that ignored files are deleted too.
+CAUTION: `git worktree remove` also deletes ignored files, for example `.env.local`. `wrktree` cannot tell these files apart from `node_modules`. In the screen, `d` on a clean worktree deletes it immediately, with no prompt. The ignored files of that worktree, for example `.env.local`, are deleted with it.
 
-These rules apply to `d` in the screen and to `wrktree rm`:
+These rules apply to `d` and `D` in the screen and to `wrktree rm`:
 
 - You cannot delete the main worktree.
 - You cannot delete a locked worktree. The error shows the lock reason.
 - You cannot delete a worktree whose folder is missing. Use prune for it.
 - You cannot delete a worktree that has a different worktree in its folder. `git worktree remove` deletes the inner worktree too, also when an ignore rule hides it. Delete the inner worktree first.
-- A clean worktree needs one confirmation. In the screen, press `y`. Every other key cancels.
 - A worktree with changed files needs the typed word `yes`. The prompt shows the number of changed files. Then `wrktree` runs `git worktree remove --force`.
 - A detached worktree with commits that no branch, remote ref, or tag contains also needs the typed word `yes`. The prompt shows the number of these commits.
-- In the screen, type `yes` and press `enter` to delete. Any other text cancels. `esc` cancels.
+
+In the screen:
+
+- `d` and `D` first check the worktree. While the check runs, the screen ignores all keys except the quit keys.
+- If the worktree is clean, the delete starts immediately. There is no prompt. The delete does not use `--force`, so git refuses it if files changed after the check.
+- If the worktree needs the typed word `yes`, a prompt opens. Type `yes` and press `enter` to delete. Any other text cancels. `esc` cancels.
+- Each prompt says that ignored files are deleted too.
 
 The branch stays by default.
 
-- In the screen, press `b` in the prompt to also delete the branch. In the typed prompt, press `tab`.
+- In the screen, press `D` in place of `d` to also delete the branch. The typed prompt then shows the line `The branch <name> is deleted too.`
+- For a detached worktree, `D` does the same as `d`.
 - With `wrktree rm`, add `--branch`.
 
 `wrktree` deletes the branch with `git branch -d`. Git refuses to delete a branch that is not merged. In that case the worktree is deleted, the branch stays, and `wrktree` shows the git message.

@@ -110,7 +110,7 @@ If the current directory is not in a git repository, each command prints
    eng-6458-bugsink-key-flows          clean      ↑0 ↓12          1.2 GB   9 days ago
    eng-6882-tp-self-serve-ui           12 files   ↑5 ↓0           …        1 day ago
 
- enter switch · o open · d delete · p prune · f fetch · / filter · q quit
+ enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit
 ```
 
 - `●` marks the worktree of the current directory. `›` marks the cursor.
@@ -128,7 +128,8 @@ Keys:
 | `↑` `↓` `j` `k` | Move the cursor. |
 | `enter` | Switch to the worktree and quit. |
 | `o` | Quit, then run the open command on the worktree. |
-| `d` | Delete the worktree, after confirmation. |
+| `d` | Delete the worktree. The branch stays. A clean worktree has no prompt. |
+| `D` | Delete the worktree, then its branch with `git branch -d`. |
 | `p` | Show stale entries, then prune after confirmation. |
 | `f` | Run `git fetch origin`, then calculate the distances again. |
 | `/` | Filter the rows by text. |
@@ -263,13 +264,27 @@ configuration file.
   delete. If `WRKTREE_CD_FILE` is not set, or the repository has no main
   worktree, the screen refuses the delete and says why. Thus the shell never
   stays in a deleted directory.
-- Clean worktree: one confirmation, then `git worktree remove <path>`.
+- The user decided the screen delete keys below on 2026-11-24. The old prompt
+  with the "also delete the branch" checkbox was confusing.
+- In the screen, `d` deletes the worktree and keeps the branch. `D` deletes the
+  worktree, then runs `git branch -d <branch>`. A branch error shows in the
+  footer and does not undo the delete. For a detached worktree, `D` does the
+  same as `d`. There is no checkbox and no other branch key.
+- Clean worktree: in the screen, no prompt. When the check is done, the tool
+  runs `git worktree remove <path>` immediately, without `--force`. Thus git
+  refuses the delete if files changed after the check. Ignored files, for
+  example `.env.local`, are deleted with no warning. `rm` asks one
+  confirmation.
 - Worktree with changed files: the prompt shows the count of changed files.
   The user must type `yes`. Then the tool runs `git worktree remove --force
   <path>`.
 - Detached worktree with commits that no branch and no remote ref contains:
   the prompt shows the count of those commits. The user must type `yes`. The
   tool finds them with `git rev-list HEAD --not --branches --remotes --tags`.
+- In the screen, the typed prompt shows the text of the delete prompt. If `D`
+  started the delete and the worktree has a branch, the next line is
+  `The branch <name> is deleted too.` Then come `Type yes to delete:` and the
+  hint `type yes + enter · esc cancel`. Only `yes` and `enter` delete.
 - `git worktree remove` also deletes ignored files, for example `.env.local`.
   The tool cannot tell these apart from `node_modules`. Thus each delete
   prompt says that ignored files are deleted too. (Builder call.)
@@ -277,8 +292,7 @@ configuration file.
   `--force` stops with an error on a worktree with changed files.
 - The branch stays by default. `rm --branch` also runs `git branch -d
   <branch>`. That command refuses an unmerged branch, and the tool shows the
-  git message. In the screen, the confirmation prompt has a `b` key that
-  toggles "also delete the branch". (Builder call.)
+  git message. In the screen, `D` deletes the branch.
 
 ### Prune
 

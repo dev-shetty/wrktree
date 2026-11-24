@@ -181,7 +181,7 @@ func TestViewShowsRows(t *testing.T) {
 	v := loaded(t).View()
 	for _, s := range []string{"master", "eng-6201-onboarding-v2-alerts", "eng-6458-bugsink-key-flows",
 		"origin/master", "4 files", "↑2 ↓31", "3 worktrees", "wrktree · mono", "1.4 GB", "3 weeks ago",
-		"enter switch · o open · d delete · p prune · f fetch · / filter · q quit"} {
+		" enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit"} {
 		if !strings.Contains(v, s) {
 			t.Errorf("view lacks %q:\n%s", s, v)
 		}

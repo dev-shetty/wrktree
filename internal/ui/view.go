@@ -19,10 +19,10 @@ const (
 	currentMark  = "●"
 	pending      = "…"
 	fetchFailed  = "fetch failed: distances can be stale"
-	keyFooter    = " enter switch · o open · d delete · p prune · f fetch · / filter · q quit"
+	keyFooter    = " enter switch · o open · d delete · D delete + branch · p prune · f fetch · / filter · q quit"
 	filterFooter = " enter keep filter · esc clear filter"
-	branchOption = "also delete the branch"
 	typedLabel   = "Type yes to delete: "
+	typedHint    = "type yes + enter · esc cancel"
 	// Below these widths, the columns do not show.
 	commitMinWidth = 60
 	sizeMinWidth   = 45
@@ -192,7 +192,7 @@ func (m Model) footer(w int) []string {
 	switch m.mode {
 	case modeFilter:
 		return []string{filterFooter}
-	case modeConfirm, modeTyped:
+	case modeTyped:
 		return m.deletePrompt(w)
 	case modePrune:
 		var lines []string
@@ -204,33 +204,16 @@ func (m Model) footer(w int) []string {
 	return []string{keyFooter}
 }
 
-// deletePrompt returns the lines of the delete prompt: the text of
-// git.DeletePrompt, the branch option, the typed answer, and the key hint.
+// deletePrompt returns the lines of the typed delete prompt: the text of
+// git.DeletePrompt, the branch line if D started the delete, the typed
+// answer, and the key hint.
 func (m Model) deletePrompt(w int) []string {
 	lines := wrap(strings.TrimSpace(git.DeletePrompt(m.del.wt, m.del.plan)), w)
-	hasBranch := m.del.wt.Branch != ""
-	if hasBranch {
-		box := "[ ] "
-		if m.del.branch {
-			box = "[x] "
-		}
-		lines = append(lines, wrap(box+branchOption, w)...)
+	if m.del.branch {
+		lines = append(lines, wrap("The branch "+m.del.wt.Branch+" is deleted too.", w)...)
 	}
-	var hint string
-	switch {
-	case m.mode == modeTyped && hasBranch:
-		hint = "type yes + enter · tab branch · esc cancel"
-	case m.mode == modeTyped:
-		hint = "type yes + enter · esc cancel"
-	case hasBranch:
-		hint = "y delete · b branch · any other key cancel"
-	default:
-		hint = "y delete · any other key cancel"
-	}
-	if m.mode == modeTyped {
-		lines = append(lines, wrap(typedLabel+m.typed+"█", w)...)
-	}
-	return append(lines, wrap(hint, w)...)
+	lines = append(lines, wrap(typedLabel+m.typed+"█", w)...)
+	return append(lines, wrap(typedHint, w)...)
 }
 
 // wrap breaks s into lines of at most w columns. Each line starts with one space.
