@@ -28,7 +28,8 @@ const (
 	commitMinWidth = 60
 	sizeMinWidth   = 45
 	// chromeLines is the number of lines that are not table rows:
-	// title, blank, header, blank, status, footer.
+	// title, blank, header, blank, status, footer. The table also gets the
+	// count of the extra status and footer lines.
 	chromeLines = 6
 )
 
@@ -58,16 +59,18 @@ func (m Model) View() string {
 		w = defaultWidth
 	}
 	footer := m.footer(w)
+	status := statusLines(m.statusLine(), w)
 	lines := []string{m.title(w), ""}
 	switch {
 	case !m.loaded:
 		lines = append(lines, " loading"+pending)
 	case m.loadErr != nil:
-		lines = append(lines, " error: "+m.loadErr.Error())
+		lines = append(lines, statusLines(" error: "+oneLine(m.loadErr.Error()), w)...)
 	default:
-		lines = append(lines, m.table(w, len(footer)-1)...)
+		lines = append(lines, m.table(w, len(footer)-1+len(status)-1)...)
 	}
-	lines = append(lines, "", m.statusLine())
+	lines = append(lines, "")
+	lines = append(lines, status...)
 	lines = append(lines, footer...)
 	cut := renderer.NewStyle().MaxWidth(w)
 	for i, l := range lines {
@@ -115,6 +118,28 @@ func (m Model) title(w int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
+// oneLine puts s on one line: each run of spaces, tabs, and line ends
+// becomes one space. A git error can have many lines and tabs.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// maxStatusLines is the largest count of lines of the status text.
+const maxStatusLines = 3
+
+// statusLines breaks the status text s into lines of at most w columns. A
+// long git error then shows in full, and the table gives up the rows for
+// it. After maxStatusLines lines, the text ends with "…".
+func statusLines(s string, w int) []string {
+	if lipgloss.Width(s) <= w {
+		return []string{s}
+	}
+	lines := wrap(strings.TrimSpace(s), w)
+	if len(lines) > maxStatusLines {
+		lines = lines[:maxStatusLines]
+		lines[maxStatusLines-1] = ellipsize(lines[maxStatusLines-1]+pending, max(w, 1))
+	}
+	return lines
+}
+
 func (m Model) statusLine() string {
 	var parts []string
 	switch {
@@ -124,7 +149,7 @@ func (m Model) statusLine() string {
 		parts = append(parts, "/"+m.filter)
 	}
 	if m.note != "" {
-		parts = append(parts, m.note)
+		parts = append(parts, oneLine(m.note))
 	}
 	if m.fetchFailed {
 		parts = append(parts, fetchFailed)
