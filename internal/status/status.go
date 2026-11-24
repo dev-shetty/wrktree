@@ -160,13 +160,15 @@ func Age(t, now time.Time) string {
 
 const (
 	currentMark = "●"
-	unavailable = "—"
+	// Unavailable is the cell text for a value that is not available.
+	Unavailable = "—"
 )
 
-func name(r Row) string {
+// Label is the branch name, or the short hash of a detached HEAD, with the
+// "[locked]" and "[missing]" marks.
+func Label(r Row) string {
 	w := r.WT
 	n := w.Branch
-	folder := filepath.Base(w.Path)
 	if w.Detached || n == "" {
 		n = w.Head
 		if len(n) > 7 {
@@ -179,16 +181,33 @@ func name(r Row) string {
 	if w.Prunable {
 		n += " [missing]"
 	}
-	if !w.Detached && w.Branch != "" && folder != w.Branch {
-		n += " (" + folder + ")"
-	}
 	return n
 }
 
-func changedText(r Row) string {
+// FolderNote is the folder name in parentheses if it is different from the
+// branch name. Otherwise it is "".
+func FolderNote(r Row) string {
+	w := r.WT
+	folder := filepath.Base(w.Path)
+	if !w.Detached && w.Branch != "" && folder != w.Branch {
+		return "(" + folder + ")"
+	}
+	return ""
+}
+
+// Name is the Label followed by the FolderNote.
+func Name(r Row) string {
+	if f := FolderNote(r); f != "" {
+		return Label(r) + " " + f
+	}
+	return Label(r)
+}
+
+// ChangedText is the CHANGES cell, for example "clean" or "4 files".
+func ChangedText(r Row) string {
 	switch {
 	case !r.ChangedOK:
-		return unavailable
+		return Unavailable
 	case r.Changed == 0:
 		return "clean"
 	case r.Changed == 1:
@@ -197,14 +216,31 @@ func changedText(r Row) string {
 	return fmt.Sprintf("%d files", r.Changed)
 }
 
-func sizeText(r Row) string {
+// DistText is the distance cell, for example "↑2 ↓31".
+func DistText(r Row) string {
+	if !r.DistOK {
+		return Unavailable
+	}
+	return fmt.Sprintf("↑%d ↓%d", r.Ahead, r.Behind)
+}
+
+// SizeText is the SIZE cell. A size that is not fresh has a "~" prefix.
+func SizeText(r Row) string {
 	switch r.SizeState {
 	case disk.SizeFresh:
 		return disk.Human(r.Size)
 	case disk.SizeCached, disk.SizeStale:
 		return "~" + disk.Human(r.Size)
 	}
-	return unavailable
+	return Unavailable
+}
+
+// CommitText is the LAST COMMIT cell, for example "3 weeks ago".
+func CommitText(r Row, now time.Time) string {
+	if !r.CommitOK {
+		return Unavailable
+	}
+	return Age(r.LastCommit, now)
 }
 
 // Table writes the rows as plain text with aligned columns.
@@ -215,17 +251,11 @@ func Table(w io.Writer, rows []Row, base string, now time.Time) {
 	}
 	cells := [][]string{{" ", "BRANCH", "CHANGES", distHead, "SIZE", "LAST COMMIT"}}
 	for _, r := range rows {
-		mark, dist, age := " ", unavailable, unavailable
+		mark := " "
 		if r.Current {
 			mark = currentMark
 		}
-		if r.DistOK {
-			dist = fmt.Sprintf("↑%d ↓%d", r.Ahead, r.Behind)
-		}
-		if r.CommitOK {
-			age = Age(r.LastCommit, now)
-		}
-		cells = append(cells, []string{mark, name(r), changedText(r), dist, sizeText(r), age})
+		cells = append(cells, []string{mark, Name(r), ChangedText(r), DistText(r), SizeText(r), CommitText(r, now)})
 	}
 	widths := make([]int, len(cells[0]))
 	for _, row := range cells {

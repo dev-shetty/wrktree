@@ -232,3 +232,31 @@ func TestJSON(t *testing.T) {
 		t.Errorf("last_commit: %v", err)
 	}
 }
+
+func TestCellText(t *testing.T) {
+	now := time.Now()
+	rows := fixedRows(now)
+	cases := []struct{ got, want string }{
+		{Label(rows[0]), "master"},
+		{FolderNote(rows[0]), "(main)"},
+		{Name(rows[0]), "master (main)"},
+		{Label(rows[1]), "feat [locked]"},
+		{FolderNote(rows[1]), ""},
+		{Name(rows[2]), "gone [missing]"},
+		{Name(rows[3]), "abcdef1"},
+		{ChangedText(rows[0]), "4 files"},
+		{ChangedText(rows[2]), "—"},
+		{DistText(rows[0]), "↑2 ↓31"},
+		{DistText(rows[1]), "—"},
+		{SizeText(rows[0]), "~1.4 GB"},
+		{SizeText(rows[1]), "2 KB"},
+		{SizeText(rows[2]), "—"},
+		{CommitText(rows[0], now), "3 weeks ago"},
+		{CommitText(rows[2], now), "—"},
+	}
+	for i, c := range cases {
+		if c.got != c.want {
+			t.Errorf("case %d: got %q, want %q", i, c.got, c.want)
+		}
+	}
+}
