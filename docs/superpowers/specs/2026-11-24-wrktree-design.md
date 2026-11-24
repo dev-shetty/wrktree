@@ -88,6 +88,7 @@ The user selected A.
 | `wrktree open <name>` | Run the open command on the worktree. |
 | `wrktree rm <name> [--force] [--branch]` | Delete the worktree. |
 | `wrktree prune [--yes]` | Delete stale worktree entries. |
+| `wrktree sync <name>` | Merge the base branch into the branch of the worktree. |
 | `wrktree init <zsh\|bash>` | Print the shell function. |
 
 `<name>` matches a substring of the branch name or of the folder name. The
@@ -373,6 +374,42 @@ configuration file.
 - The branch stays by default. `rm --branch` also runs `git branch -d
   <branch>`. That command refuses an unmerged branch, and the tool shows the
   git message. In the screen, `D` deletes the branch.
+
+### Sync
+
+- The user decided on 2026-11-24 to add sync: merge the base branch into the
+  branch of one worktree.
+- `git.Runner.Sync` does the work. The subcommand and the screen call it.
+- Refusals change nothing. Each one wraps `git.ErrSyncRefused`. The checks
+  run in this order: no base (`no base branch`), missing folder
+  (`folder is missing: use prune`), bare (`bare repository`), detached
+  (`detached worktree: no branch to update`), an operation in progress
+  (`merge or rebase in progress: finish it first`), changed files
+  (`has N changed files: commit or stash first`).
+- An operation is in progress if `git rev-parse --git-path <name>` names a
+  file that exists, for `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`,
+  `rebase-merge`, or `rebase-apply`.
+- If the count of changed files cannot be read, sync returns that error. It
+  never treats an unreadable worktree as clean.
+- Then the tool fetches the base, with a limit of 15 seconds. A failed fetch
+  does not stop the sync. The merge uses the local copy of the base.
+- If the branch is not behind the base, the result is "up to date".
+- The merge is `git merge --no-edit <base>`. It is a write call, so it does
+  not get `--no-optional-locks`. It gets `GIT_TERMINAL_PROMPT=0` and
+  `GIT_MERGE_AUTOEDIT=no`.
+- If the merge fails, the tool reads the conflict files with
+  `git diff --name-only --diff-filter=U`. If `MERGE_HEAD` exists, the merge of
+  this call is in progress, and the tool runs `git merge --abort`. Thus the
+  worktree stays as it was. The tool never cancels a merge that it did not
+  start. A failed abort gives the error `merge --abort failed in <path>: ...`.
+- A merge with conflicts gives the conflict files. A merge that failed for a
+  different reason, for example a hook, gives the git message.
+- Sync never pushes, rebases, resets, or stashes.
+- `wrktree sync <name>` prints `synced <branch> with <base>` or
+  `<branch> is already up to date with <base>` on stdout. A failed fetch adds
+  `wrktree: fetch failed: used the local copy of <base>` on stderr. A
+  conflict gives `sync failed: conflict in <files>` and exit code 1. The list
+  shows 3 files, then ` and N more`. A refusal gives its text and exit code 1.
 
 ### Prune
 

@@ -111,18 +111,31 @@ func readOnly(args []string) bool {
 
 // gitEnv returns the environment of the git command args. A fetch gets
 // GIT_TERMINAL_PROMPT=0, so git does not ask for a user name or a password.
-// The ssh command and the askpass settings of the user stay as they are.
+// The ssh command and the askpass settings of the user stay as they are. A
+// merge also gets GIT_MERGE_AUTOEDIT=no, so git does not open an editor.
 func gitEnv(environ, args []string) []string {
-	if !isFetch(args) {
+	set := map[string]string{}
+	switch {
+	case isFetch(args):
+		set["GIT_TERMINAL_PROMPT"] = "0"
+	case len(args) > 0 && args[0] == "merge":
+		set["GIT_TERMINAL_PROMPT"] = "0"
+		set["GIT_MERGE_AUTOEDIT"] = "no"
+	default:
 		return environ
 	}
-	env := make([]string, 0, len(environ)+1)
+	env := make([]string, 0, len(environ)+len(set))
 	for _, kv := range environ {
-		if k, _, _ := strings.Cut(kv, "="); k != "GIT_TERMINAL_PROMPT" {
+		if k, _, _ := strings.Cut(kv, "="); set[k] == "" {
 			env = append(env, kv)
 		}
 	}
-	return append(env, "GIT_TERMINAL_PROMPT=0")
+	for _, k := range []string{"GIT_TERMINAL_PROMPT", "GIT_MERGE_AUTOEDIT"} {
+		if v := set[k]; v != "" {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
 }
 
 // In returns a Runner for the same repository in a different directory.

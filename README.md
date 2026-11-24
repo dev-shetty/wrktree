@@ -145,6 +145,7 @@ Step 4 can miss a squash merge. This occurs when the base branch changed the lin
 | `wrktree open <name>` | Run the open command on the worktree. |
 | `wrktree rm <name> [--force] [--branch]` | Delete the worktree. |
 | `wrktree prune [--yes]` | Remove the entries of worktrees whose folder is missing. |
+| `wrktree sync <name>` | Merge the base branch into the branch of the worktree. See [Sync](#sync). |
 | `wrktree init <zsh\|bash> [--name <name>]` | Print the shell function. |
 
 `<name>` is a part of the branch name or of the folder name. Case is not important.
@@ -210,6 +211,34 @@ The current worktree:
 `wrktree rm --force` deletes without a prompt. Without a terminal and without `--force`, `wrktree rm` stops with an error on a worktree with changed files.
 
 If stdin closes or gives a read error before an answer, `wrktree rm` and `wrktree prune` print `cancelled` and stop with exit code 1. An answer that does not continue, for example `n`, stops with exit code 0.
+
+## Sync
+
+Sync merges the base branch, for example `origin/master`, into the branch of one worktree. Run `wrktree sync <name>`.
+
+`wrktree` does these steps:
+
+1. It fetches the base branch, with a limit of 15 seconds.
+2. If the branch already contains the base branch, it stops. It prints `<branch> is already up to date with <base>`.
+3. It runs `git merge --no-edit <base>` in the worktree. It prints `synced <branch> with <base>`.
+
+If the fetch fails, the merge uses the local copy of the base branch. Then `wrktree` also prints `wrktree: fetch failed: used the local copy of <base>` on stderr.
+
+Sync refuses in these cases. It changes nothing, prints the reason, and stops with exit code 1:
+
+| Reason | Text |
+|---|---|
+| The repository has no base branch. | `no base branch` |
+| The folder of the worktree is missing. | `folder is missing: use prune` |
+| The worktree is detached. | `detached worktree: no branch to update` |
+| A merge, cherry-pick, revert, or rebase is in progress in the worktree. | `merge or rebase in progress: finish it first` |
+| The worktree has changed or untracked files. | `has N changed files: commit or stash first` |
+
+A conflict cancels the merge with `git merge --abort`. Thus the worktree stays as it was before the sync. `wrktree` prints `sync failed: conflict in <files>` and stops with exit code 1. After 3 files, the list ends with `and N more`. To merge with conflicts, run `git merge` yourself.
+
+`wrktree` cancels only the merge that it started. A merge that you started stays.
+
+Sync never pushes. It never rebases, resets, or stashes. The merge gets `GIT_MERGE_AUTOEDIT=no` and `GIT_TERMINAL_PROMPT=0`, so git does not open an editor or ask for a password.
 
 ## Prune
 
