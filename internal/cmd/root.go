@@ -90,6 +90,7 @@ func New(env Env) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "wrktree",
 		Short:         "Manage git worktrees",
+		Version:       versionText(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
