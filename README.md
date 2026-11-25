@@ -22,11 +22,23 @@ See all git worktrees of a repository in one table. Switch, sync, or delete a wo
 
 ## Install
 
-You must have Go 1.24 or later.
+Use the install script. It downloads the newest release for your system and checks the checksum:
+
+```sh
+curl -sSL https://raw.githubusercontent.com/dev-shetty/wrktree/main/install.sh | sh
+```
+
+The script installs to `/usr/local/bin` if you can write to it, and to `~/.local/bin` if you cannot. To select a different folder, set `WRKTREE_INSTALL_DIR`.
+
+If you have Go 1.24 or later, you can also build from source:
 
 ```sh
 go install github.com/dev-shetty/wrktree@latest
 ```
+
+You can also download an archive from the [releases page](https://github.com/dev-shetty/wrktree/releases). The binaries are not signed. If you download with a browser on macOS, run `xattr -d com.apple.quarantine wrktree` before the first use.
+
+To see the installed version, run `wrktree --version`.
 
 Then add the shell function to `~/.zshrc` or `~/.bashrc`:
 
