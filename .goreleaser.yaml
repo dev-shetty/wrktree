@@ -1,0 +1,36 @@
+version: 2
+
+project_name: wrktree
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/dev-shetty/wrktree/internal/cmd.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    # The name has no version, so that the "latest/download" URL stays the same.
+    # install.sh uses these names.
+    name_template: >-
+      {{ .ProjectName }}_{{ title .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
