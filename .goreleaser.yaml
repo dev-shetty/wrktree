@@ -46,5 +46,7 @@ notarize:
         issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
         key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
         key: "{{ .Env.MACOS_NOTARY_KEY }}"
-        wait: true
-        timeout: 20m
+        # Apple can take hours for the first submissions of a new Developer ID.
+        # The release does not wait for the answer. A binary cannot hold the
+        # result, so macOS reads it from Apple at the first run.
+        wait: false

@@ -36,7 +36,7 @@ If you have Go 1.24 or later, you can also build from source:
 go install github.com/dev-shetty/wrktree@latest
 ```
 
-You can also download an archive from the [releases page](https://github.com/dev-shetty/wrktree/releases). The macOS binaries are signed and notarized by Apple.
+You can also download an archive from the [releases page](https://github.com/dev-shetty/wrktree/releases). The macOS binaries are signed with an Apple Developer ID and sent to Apple for notarization. If macOS blocks a binary that you downloaded with a browser, run `xattr -d com.apple.quarantine wrktree`.
 
 To see the installed version, run `wrktree --version`.
 
